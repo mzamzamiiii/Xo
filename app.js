@@ -80,23 +80,47 @@ service.on('ready', () => {
 });
 
 service.on('message', async (message) => {
-    // التقاط رسائل الصيد من البوت المستهدف
-    if (!message.isGroup && (message.sourceSubscriberId === settings.targetBotId || message.authorId === settings.targetBotId)) {
-        
-        const content = message.body || message.content || "";
-        const match = content.match(/\(ID\s*(\d+)\)/);
-        
-        if (match && match[1]) {
-            const roomId = parseInt(match[1]);
-            console.log(`📥 إضافة الروم ${roomId} إلى الطابور...`);
-            
+    if (!message.isGroup &&
+        (message.sourceSubscriberId === settings.targetBotId ||
+         message.authorId === settings.targetBotId)) {
+
+        const content =
+            message.body ||
+            message.content ||
+            message.text ||
+            message.message ||
+            "";
+
+        console.log("الرسالة المستلمة:", content);
+
+        const matches = [...content.matchAll(/\(([^)]*)\)/g)];
+
+        let roomId = null;
+
+        for (const m of matches) {
+            const digits = m[1].replace(/\D/g, '');
+
+            // نفترض أن رقم القناة طويل بينما رقم المستخدم أقصر
+            if (digits.length >= 6) {
+                roomId = parseInt(digits, 10);
+                break;
+            }
+        }
+
+        if (roomId) {
+            console.log(`📥 إضافة الروم ${roomId} إلى الطابور`);
+
             heistQueue.push(roomId);
-            
+
             if (!isResting) {
                 processQueue();
             } else {
-                console.log(`⏳ استراحة حالياً. سيتم معالجة الروم ${roomId} فور العودة للعمل.`);
+                console.log(
+                    `⏳ استراحة حالياً. سيتم معالجة الروم ${roomId} فور العودة للعمل.`
+                );
             }
+        } else {
+            console.log("⚠️ لم يتم العثور على رقم قناة داخل الرسالة");
         }
     }
 });
