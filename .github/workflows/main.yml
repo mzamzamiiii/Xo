@@ -1,20 +1,17 @@
-name: Continuous Bot Runner
+name: Manual Cycle Bot (5H / 10M)
 
 on:
-  schedule:
-    # يعمل كل 4 ساعات بتوقيت مكة (تجنب 9 AM - 12 PM برمجياً في الأسفل)
-    - cron: '0 22,2,6,10,14,18 * * *'
   workflow_dispatch:
 
 concurrency:
-  group: wolf-bot-running
-  cancel-in-progress: true 
+  group: wolf-cycle-bot
+  cancel-in-progress: true
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 240 
-    
+    timeout-minutes: 600  # حماية (10 ساعات حد أقصى)
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -27,27 +24,24 @@ jobs:
       - name: Install Dependencies
         run: npm install
 
-      - name: Execution Logic
+      - name: Start Cycle Bot
         env:
           U_MAIL: ${{ secrets.U_MAIL }}
           U_PASS: ${{ secrets.U_PASS }}
-          ENTRY_P: ${{ secrets.ENTRY_P }}
-          EXIT_P: ${{ secrets.EXIT_P }}
-          MATCH_V: ${{ secrets.MATCH_V }}
-          EXEC_V: ${{ secrets.EXEC_V }}
         run: |
-          # الحصول على الساعة الحالية بتوقيت مكة
-          HOUR=$(date -u -d "+3 hours" +%H)
-          
-          echo "⏰ الساعة الآن بتوقيت مكة المكرمة: $HOUR"
+          echo "🚀 بدء دورة البوت (5 ساعات تشغيل / 10 دقائق راحة)"
 
-          # نظام الراحة: التوقف إذا كانت الساعة بين 9 صباحاً و 12 ظهراً
-          if [ "$HOUR" -ge 9 ] && [ "$HOUR" -lt 12 ]; then
-            echo "💤 توقيت الراحة الرسمي. السيرفر سيبقى خاملاً."
-            exit 0
-          fi
-          
-          echo "🚀 بدء دورة التشغيل (4 ساعات)..."
-          
-          # تشغيل ملف app.js
-          node app.js
+          while true
+          do
+            echo "🟢 تشغيل البوت لمدة 5 ساعات"
+            node app.js &
+            BOT_PID=$!
+
+            sleep 18000  # 5 ساعات
+
+            echo "🛑 إيقاف البوت"
+            kill $BOT_PID || true
+
+            echo "😴 راحة 10 دقائق"
+            sleep 600
+          done
