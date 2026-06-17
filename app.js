@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import wolfjs from 'wolf.js';
+import fetch from 'node-fetch';
 
 const { WOLF } = wolfjs;
 const client = new WOLF();
@@ -7,53 +8,69 @@ const client = new WOLF();
 const ROOM_ID = 215022;
 const ALLOWED_USER_ID = 26491704;
 
-function getSenderId(msg) {
-  return msg?.sender?.id || msg?.sender || msg?.from || msg?.user;
+let waiting = false;
+
+async function analyzeImage(imageUrl) {
+  // 🔥 AI بسيط (بديل جاهز)
+  const res = await fetch("https://api-inference.huggingface.co/models/google/vit-base-patch16-224", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.HF_TOKEN}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ inputs: imageUrl })
+  });
+
+  const data = await res.json();
+  return data;
 }
 
-// 🔴 مهم: ننتظر ready event
-client.on('ready', async () => {
-  try {
-    console.log('✅ Client is READY (session active)');
-
-    const res = await client.messaging.sendGroupMessage(
-      ROOM_ID,
-      '!ج'
-    );
-
-    console.log('📦 Send response:', res);
-    console.log('📤 Message sent');
-
-  } catch (err) {
-    console.error('❌ Send error:', err);
-  }
-});
-
-// تسجيل الدخول فقط
+// 🔐 login
 (async () => {
-  try {
-    console.log('🚀 Starting login...');
-
-    await client.login({
-      email: process.env.U_MAIL_1,
-      password: process.env.U_PASS_1
-    });
-
-    console.log('🔐 Login request sent...');
-  } catch (err) {
-    console.error('❌ Login error:', err);
-  }
+  await client.login({
+    email: process.env.U_MAIL_1,
+    password: process.env.U_PASS_1
+  });
 })();
 
-// استقبال الرسائل
-client.on('message', (msg) => {
+// 🚀 ready
+client.on('ready', async () => {
+  console.log('✅ Ready');
+
+  await client.messaging.sendGroupMessage(ROOM_ID, '!ج');
+
+  waiting = true;
+});
+
+// 📩 استقبال الصور
+client.on('message', async (msg) => {
   try {
-    const senderId = getSenderId(msg);
+    const senderId =
+      msg.sender?.id || msg.sender || msg.from || msg.user;
 
-    if (!senderId) return;
     if (senderId !== ALLOWED_USER_ID) return;
+    if (!waiting) return;
 
-    console.log('✅ Allowed message:', msg.text);
+    const imageUrl =
+      msg.image?.url ||
+      msg.file?.url ||
+      msg.attachment?.url ||
+      msg.media?.url;
+
+    if (!imageUrl) return;
+
+    console.log('🖼️ Image received');
+
+    const result = await analyzeImage(imageUrl);
+
+    console.log('🤖 AI RESULT:', result);
+
+    await client.messaging.sendGroupMessage(
+      ROOM_ID,
+      `🧠 تحليل الصورة: ${JSON.stringify(result[0]?.label || result)}`
+    );
+
+    waiting = false;
 
   } catch (err) {
     console.error(err);
