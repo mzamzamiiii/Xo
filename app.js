@@ -30,38 +30,50 @@ client.on('ready', async () => {
   }
 });
 
-// ================== IMAGE ANALYSIS (HIGH ACCURACY + SHORT OUTPUT) ==================
+// ================== OPENAI VISION ==================
 async function analyzeImage(imageUrl) {
   try {
-    const buffer = await fetch(imageUrl).then(r => r.arrayBuffer());
+    const response = await fetch(imageUrl);
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const base64 = buffer.toString('base64');
 
-    const res = await fetch(
-      "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-base",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.HF_TOKEN}`,
-          "Content-Type": "application/octet-stream"
-        },
-        body: Buffer.from(buffer)
-      }
-    );
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: "Give only 1 or 2 words describing the object in the image. No explanation."
+              },
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:image/jpeg;base64,${base64}`
+                }
+              }
+            ]
+          }
+        ],
+        max_tokens: 10
+      })
+    });
 
     const data = await res.json();
 
-    let text = data?.[0]?.generated_text || "Unknown";
+    let text = data?.choices?.[0]?.message?.content?.trim() || "Unknown";
 
-    // ✂️ نخليها كلمة أو كلمتين فقط
-    text = text
-      .replace("a photo of", "")
-      .replace("an image of", "")
-      .replace("a picture of", "")
-      .trim()
-      .split(" ")
-      .slice(0, 2)
-      .join(" ");
+    // تنظيف إلى كلمتين فقط
+    text = text.split(" ").slice(0, 2).join(" ");
 
-    return text || "Unknown";
+    return text;
 
   } catch (err) {
     console.log("AI ERROR:", err);
@@ -81,11 +93,10 @@ function getImageUrl(message) {
   );
 }
 
-// ================== LISTENER (STRICT FILTER) ==================
+// ================== LISTENER ==================
 client.on('groupMessage', async (message) => {
   try {
 
-    // 🔥 نفس العضو + نفس القناة
     if (
       message.sourceSubscriberId !== TARGET_USER_ID ||
       message.targetGroupId !== ROOM_ID
@@ -103,7 +114,6 @@ client.on('groupMessage', async (message) => {
 
     console.log("RESULT =", result);
 
-    // ❌ بدون 🧠 نهائيًا
     await client.messaging.sendGroupMessage(
       ROOM_ID,
       result
