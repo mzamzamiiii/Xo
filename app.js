@@ -3,16 +3,17 @@ import wolfjs from 'wolf.js';
 
 const { WOLF } = wolfjs;
 
+const client = new WOLF();
+
+// 🔧 إعداداتك
 const ROOM_ID = 215022;
 const ALLOWED_USER_ID = 26491704;
 
-const client = new WOLF();
+let waitForImage = false;
 
-function getSenderId(msg) {
-  return msg?.sender?.id || msg?.sender || msg?.from || msg?.user;
-}
-
-// 🔐 تسجيل الدخول
+// =========================
+// 🔐 LOGIN
+// =========================
 (async () => {
   try {
     console.log('🚀 Logging in...');
@@ -22,40 +23,93 @@ function getSenderId(msg) {
       password: process.env.U_PASS_1
     });
 
-    console.log('🔐 Login sent');
+    console.log('🔐 Logged in');
+
   } catch (err) {
     console.error('❌ Login error:', err);
   }
 })();
 
-// ✅ عند الجاهزية
+// =========================
+// 📤 READY → إرسال !ج
+// =========================
 client.on('ready', async () => {
   try {
-    console.log('✅ READY');
+    console.log('✅ Ready');
 
-    const res = await client.messaging.sendGroupMessage(
+    await client.messaging.sendGroupMessage(
       ROOM_ID,
       '!ج'
     );
 
     console.log('📤 Sent !ج');
-    console.log('📦 Response:', res);
+
+    waitForImage = true;
 
   } catch (err) {
     console.error('❌ Send error:', err);
   }
 });
 
-// 📩 استقبال الرسائل (عضو واحد فقط)
-client.on('message', (msg) => {
+// =========================
+// 🧠 تحليل الصورة (اسم فقط)
+// =========================
+async function analyzeImage(imageUrl) {
   try {
-    const senderId = getSenderId(msg);
+    const res = await fetch(
+      "https://api-inference.huggingface.co/models/google/vit-base-patch16-224",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.HF_TOKEN}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ inputs: imageUrl })
+      }
+    );
 
-    if (!senderId) return;
-    if (senderId !== ALLOWED_USER_ID) return;
+    const data = await res.json();
 
-    console.log('📩 Allowed message:', msg.text || msg);
+    return data?.[0]?.label || "Unknown";
+
   } catch (err) {
-    console.error('❌ Message error:', err);
+    return "Error";
+  }
+}
+
+// =========================
+// 📩 استقبال الرسائل
+// =========================
+client.on('message', async (msg) => {
+  try {
+    const senderId =
+      msg?.sender?.id || msg?.sender || msg?.from || msg?.user;
+
+    if (senderId !== ALLOWED_USER_ID) return;
+    if (!waitForImage) return;
+
+    const imageUrl =
+      msg?.image?.url ||
+      msg?.file?.url ||
+      msg?.attachment?.url ||
+      msg?.media?.url;
+
+    if (!imageUrl) return;
+
+    console.log('🖼️ Image received');
+
+    const result = await analyzeImage(imageUrl);
+
+    console.log('🤖 Result:', result);
+
+    await client.messaging.sendGroupMessage(
+      ROOM_ID,
+      `🧠 ${result}`
+    );
+
+    waitForImage = false;
+
+  } catch (err) {
+    console.error('❌ Error:', err);
   }
 });
