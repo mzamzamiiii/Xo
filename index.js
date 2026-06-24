@@ -35,7 +35,7 @@ function getBestMove() {
   
   if (availableMoves.length === 0) return undefined;
 
-  // 1. اقتناص الفوز الفوري (أولوية قصوى)
+  // 1. اقتناص الفوز الفوري
   for (let combo of WINNING_COMBOS) {
     let myCount = combo.filter(i => board[i] === mySign).length;
     let emptyCount = combo.filter(i => board[i] === null).length;
@@ -102,7 +102,6 @@ function getBestMove() {
 function handleIncomingData(message) {
   const text = (message.body || message.content || '').toLowerCase();
 
-  // فحص انتهاء المباراة لبدء جولة جديدة بأمان زمني
   if (
     text.includes('lost') || 
     text.includes('won') || 
@@ -133,7 +132,6 @@ function handleIncomingData(message) {
     isGameEnding = false;
   }
 
-  // كشف الرموز بشكل صحيح ودقيق
   if (text.includes('(o)') || text.includes('⭕') || text.includes('filter: hue-rotate(210deg)') || text.includes('turn! (⭕)')) { 
     mySign = 'O'; 
     botSign = 'X'; 
@@ -142,7 +140,6 @@ function handleIncomingData(message) {
     botSign = 'O'; 
   }
 
-  // تفكيك وقراءة مصفوفة اللوحة من كتل الأزرار (طريقة شديدة الدقة)
   const positions = text.split('xobot-mp-private__content__middle__position');
   
   if (positions.length > 1) {
@@ -153,18 +150,15 @@ function handleIncomingData(message) {
       } else if (block.includes('--o') || block.includes('⭕') || block.includes('position--o')) {
         board[i] = 'O';
       } else {
-        board[i] = null; // الخانة فارغة تماماً وجاهزة للعب
+        board[i] = null; 
       }
     }
   } else {
-    // طريقة فحص احتياطية معتمدة على الأرقام الصريحة المتبقية على الأزرار
     for (let i = 0; i < 9; i++) {
       const squareNum = (i + 1).toString();
-      // إذا كان رقم المربع موجوداً في النص، فهو فارغ حتماً
       if (text.includes(`>${squareNum}<`) || text.includes(`"${squareNum}"`) || text.includes(` ${squareNum} `)) {
         board[i] = null;
       } else if (board[i] === null) {
-        // إذا اختفى الرقم ولم نسجل فيه حركة من قبل، فهو بالتأكيد للخصم
         board[i] = botSign; 
       }
     }
@@ -183,17 +177,40 @@ function handleIncomingData(message) {
       board[moveIndex] = mySign;
       lastPlayedIndex = moveIndex; 
 
-      const secureDelay = Math.floor(Math.random() * (2500 - 1500 + 1)) + 1500;
+      const secureDelay = Math.floor(Math.random() * (2200 - 1500 + 1)) + 1500;
       console.log(`⏳ تأخير أمان آمن: [ ${secureDelay}ms ] ثم إرسال الحركة للمربع: [ ${squareToPlay} ]`);
       
       setTimeout(async () => {
-        await sendPrivateMessage(XO_BOT_ID, squareToPlay);
+        await sendPrivateMessageWithRetry(XO_BOT_ID, squareToPlay);
       }, secureDelay); 
     }
   }
 }
 
-// ================== إرسال الرسائل ==================
+// ================== نظام الإرسال المطور مع التحقق وإعادة المحاولة ==================
+async function sendPrivateMessageWithRetry(targetId, text, attempt = 1) {
+  if (!service || !isBotReady) return;
+  try {
+    // ننتظر استجابة السيرفر الفعلية للتأكد من وصولها
+    const response = await service.messaging.sendPrivateMessage(targetId, text);
+    
+    // إذا رجعت الاستجابة بنجاح
+    console.log(`✅ [سيرفر وولف استقبلها]: تم تسجيل الحركة بنجاح للمربع رقم: [ ${text} ]`);
+  } catch (err) {
+    console.log(`⚠️ فشل إرسال الحركة للمربع [ ${text} ] في المحاولة رقم [ ${attempt} ]. السبب: ${err.message}`);
+    
+    if (attempt < 3 && !isGameEnding) {
+      console.log(`🔄 جاري إعادة المحاولة الإجبارية بعد 800ms لضمان الإرسال...`);
+      setTimeout(() => {
+        sendPrivateMessageWithRetry(targetId, text, attempt + 1);
+      }, 800);
+    } else {
+      console.log(`❌ تم إلغاء الحركة [ ${text} ] بعد 3 محاولات فاشلة لتجنب التعليق.`);
+      lastPlayedIndex = -1; // تصفير المؤشر ليعيد المحاولة بحركة جديدة عند التحديث القادم
+    }
+  }
+}
+
 async function sendGroupMessage(roomId, text) {
   if (!service || !isBotReady) return;
   try {
@@ -204,17 +221,7 @@ async function sendGroupMessage(roomId, text) {
   }
 }
 
-async function sendPrivateMessage(targetId, text) {
-  if (!service || !isBotReady) return;
-  try {
-    await service.messaging.sendPrivateMessage(targetId, text);
-    console.log(`🕹️ تم إرسال الحركة للمربع رقم: [ ${text} ]`);
-  } catch (err) {
-    console.log('❌ خطأ خاص:', err.message);
-  }
-}
-
-// ================== تشغيل البوت والتنصت المزدوج ==================
+// ================== تشغيل البوت والتنصت ==================
 function startBot() {
   service = new WOLF();
 
@@ -248,7 +255,7 @@ function startBot() {
   });
 
   service.on('ready', async () => {
-    console.log('🛡️ تم تفعيل البوت المصلح بالكامل؛ جاهز للفوز الفوري ومنع الأخطاء!');
+    console.log('🛡️ وضع التأكيد المطور نشط الآن! لن تضيع أي حركة بعد اليوم.');
     isBotReady = true;
     reconnecting = false;
     await sleep(2000);
