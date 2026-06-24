@@ -19,7 +19,7 @@ let mySign = 'X';
 let botSign = 'O';    
 let lastPlayedIndex = -1; 
 let isGameEnding = false; 
-let isSending = false; // قفل حماية صارم لمنع التكرار والتعليق
+let isSending = false; 
 
 const WINNING_COMBOS = [
   [0, 1, 2], [3, 4, 5], [6, 7, 8], 
@@ -27,7 +27,7 @@ const WINNING_COMBOS = [
   [0, 4, 8], [2, 4, 6]             
 ];
 
-// ================== خوارزمية ذكاء اصطناعي استراتيجية للفوز ==================
+// ================== استراتيجية الفوز السريعة والمضمونة ==================
 function getBestMove() {
   const availableMoves = [];
   for (let i = 0; i < 9; i++) {
@@ -36,7 +36,7 @@ function getBestMove() {
   
   if (availableMoves.length === 0) return undefined;
 
-  // 1. اقتناص الفوز الفوري (أولوية هجومية قصوى)
+  // 1. اقتناص الفوز الفوري
   for (let combo of WINNING_COMBOS) {
     let myCount = combo.filter(i => board[i] === mySign).length;
     let emptyCount = combo.filter(i => board[i] === null).length;
@@ -45,7 +45,7 @@ function getBestMove() {
     }
   }
 
-  // 2. حظر الخصم ومنعه من الفوز (دفاع حاسم)
+  // 2. حظر الخصم ومنعه من الفوز فوراً
   for (let combo of WINNING_COMBOS) {
     let botCount = combo.filter(i => board[i] === botSign).length;
     let emptyCount = combo.filter(i => board[i] === null).length;
@@ -54,7 +54,7 @@ function getBestMove() {
     }
   }
 
-  // 3. استراتيجية الفوز بالفخ (Fork) - ابحث عن حركة تفتح خطين فوز معاً
+  // 3. صناعة فخ مزدوج (Fork) إن أمكن
   for (let move of availableMoves) {
     board[move] = mySign;
     let winningLines = 0;
@@ -63,14 +63,14 @@ function getBestMove() {
       let emptyCount = combo.filter(i => board[i] === null).length;
       if (myCount === 2 && emptyCount === 1) winningLines++;
     }
-    board[move] = null; 
-    if (winningLines >= 2) return move; // إذا كانت تصنع فخاً، العبها فوراً!
+    board[move] = null;
+    if (winningLines >= 2) return move;
   }
 
-  // 4. السيطرة التامة على مركز اللوحة (المنتصف هو مفتاح الفوز والاستراتيجية)
+  // 4. احتلال المركز (5 وهو إندكس 4) لأنه يعطي أعلى أفضليات فوز
   if (board[4] === null && availableMoves.includes(4)) return 4;
 
-  // 5. احتلال الزوايا الاستراتيجية لصناعة الفخاخ المستقبلية
+  // 5. احتلال الزوايا الاستراتيجية
   const corners = [0, 2, 6, 8];
   const availableCorners = corners.filter(i => board[i] === null);
   if (availableCorners.length > 0) {
@@ -80,16 +80,25 @@ function getBestMove() {
   return availableMoves[Math.floor(Math.random() * availableMoves.length)];
 }
 
-// ================== معالجة وقراءة اللوحة بدقة ==================
+// ================== معالجة وقراءة البيانات وتحديث الجولات تلقائياً ==================
 function handleIncomingData(message) {
   const text = (message.body || message.content || '').toLowerCase();
 
-  // فحص انتهاء الجولة لبدء جولة جديدة تلقائياً وبشكل مستمر
-  if (text.includes('lost') || text.includes('won') || text.includes('tie') || text.includes('draw') || text.includes('تعادل') || text.includes('rematch') || text.includes('expires in')) {
+  // رصد حقيقي ومرن لانتهاء اللعبة لبدء جولة جديدة فوراً ودون تعليق
+  if (
+    text.includes('won') || 
+    text.includes('lost') || 
+    text.includes('tie') || 
+    text.includes('draw') || 
+    text.includes('تعادل') || 
+    text.includes('rematch') || 
+    text.includes('game over') ||
+    text.includes('expires')
+  ) {
     if (!isGameEnding) {
       isGameEnding = true; 
       isSending = false;
-      console.log('🏁 انتهت المباراة الحالية. جاري طلب جولة جديدة تلقائياً بعد 5 ثوانٍ...');
+      console.log('🏁 تم رصد نهاية المباراة حتماً. جاري بدء جولة جديدة تلقائياً خلال 5 ثوانٍ...');
       board = Array(9).fill(null);
       lastPlayedIndex = -1;
 
@@ -102,14 +111,14 @@ function handleIncomingData(message) {
   }
 
   if (text.includes('game started') || text.includes('بدأت اللعبة')) {
-    console.log('🎮 جولة جديدة بدأت، تصفير الإعدادات...');
+    console.log('🎮 جولة جديدة انطلقت، تصفير مصفوفة اللوحة...');
     board = Array(9).fill(null);
     lastPlayedIndex = -1;
     isGameEnding = false;
     isSending = false;
   }
 
-  // تحديد الرمز ديناميكياً بناءً على بداية السطر العلوي
+  // التعرف الصارم والديناميكي على الرمز الحالي للبوت (X أو O)
   if (text.includes('your turn! (❌)') || text.includes('turn! (❌)') || text.includes('your turn! (x)')) {
     mySign = 'X';
     botSign = 'O';
@@ -118,7 +127,7 @@ function handleIncomingData(message) {
     botSign = 'X';
   }
 
-  // قراءة خانات اللوحة
+  // تفكيك وقراءة الأزرار للحصول على اللوحة اللحظية
   const positions = text.split('xobot-mp-private__content__middle__position');
   if (positions.length > 1) {
     for (let i = 0; i < 9; i++) {
@@ -133,9 +142,10 @@ function handleIncomingData(message) {
     }
   }
 
-  console.log(`✨ الرمز الفعلي الحالي: [ ${mySign} ] | رمز الخصم: [ ${botSign} ]`);
-  console.log("🔍 حالة اللوحة الحالية:", board.map((v, i) => v || (i + 1)));
+  console.log(`✨ رمزي النشط الآن: [ ${mySign} ] | رمز الخصم: [ ${botSign} ]`);
+  console.log("🔍 لوحة اللعبة الحالية:", board.map((v, i) => v || (i + 1)));
 
+  // فحص ما إذا كان الدور دور البوت ولم يتم إرسال حركة حالياً
   const isMyTurn = text.includes('your turn') || text.includes('turn') || text.includes('xobot-mp-private__content__top__turn');
 
   if (isMyTurn && !isGameEnding && !isSending) {
@@ -143,13 +153,13 @@ function handleIncomingData(message) {
     if (moveIndex !== undefined && moveIndex !== -1 && moveIndex !== lastPlayedIndex) {
       const squareToPlay = (moveIndex + 1).toString();
       
-      isSending = true; // إغلاق القفل فوراً لحماية الحركة من التكرار
+      isSending = true; // تفعيل القفل لمنع إرسال حركتين معاً
       board[moveIndex] = mySign;
       lastPlayedIndex = moveIndex; 
 
-      // توقيت آمن وممتاز لحماية الحساب ومنع السقوط الصامت
-      const secureDelay = Math.floor(Math.random() * (1500 - 1000 + 1)) + 1000; 
-      console.log(`⏳ تأخير ذكي لحماية الحساب: [ ${secureDelay}ms ] لإرسال الرقم: [ ${squareToPlay} ]`);
+      // توقيت إرسال سريع وآمن (بين ثانية وثانية ونصف) لمنع تجاوز السيرفر لدورك
+      const secureDelay = Math.floor(Math.random() * (1300 - 900 + 1)) + 900; 
+      console.log(`⏳ معالجة سريعة وخاطفة، تأخير: [ ${secureDelay}ms ] لإرسال الرقم: [ ${squareToPlay} ]`);
       
       setTimeout(async () => {
         await sendPrivateMessageWithRetry(XO_BOT_ID, squareToPlay);
@@ -158,7 +168,7 @@ function handleIncomingData(message) {
   }
 }
 
-// ================== نظام الإرسال الآمن ==================
+// ================== نظام إرسال متوازن ومحمي مع إعادة محاولة تلقائية ==================
 async function sendPrivateMessageWithRetry(targetId, text, attempt = 1) {
   if (!service || !isBotReady) {
     isSending = false;
@@ -166,16 +176,16 @@ async function sendPrivateMessageWithRetry(targetId, text, attempt = 1) {
   }
   try {
     await service.messaging.sendPrivateMessage(targetId, text);
-    console.log(`✅ [استجابة وولف]: تم إرسال الحركة للمربع رقم: [ ${text} ]`);
+    console.log(`✅ [وولف استقبل الحركة]: تم تسجيل المربع بنجاح: [ ${text} ]`);
   } catch (err) {
-    console.log(`⚠️ فشل إرسال رقم [ ${text} ] محاولة [ ${attempt} ]. السبب: ${err.message}`);
+    console.log(`⚠️ فشل إرسال رقم [ ${text} ] محاولة [ ${attempt} ]: ${err.message}`);
     if (attempt < 3 && !isGameEnding) {
       setTimeout(() => {
         sendPrivateMessageWithRetry(targetId, text, attempt + 1);
-      }, 600);
+      }, 500);
     } else {
       lastPlayedIndex = -1; 
-      isSending = false; // فتح القفل عند الفشل النهائي لإعادة المحاولة
+      isSending = false; 
     }
   }
 }
@@ -185,7 +195,7 @@ async function sendGroupMessage(roomId, text) {
   try { await service.messaging.sendGroupMessage(roomId, text); } catch (err) {}
 }
 
-// ================== تشغيل البوت والتنصت المتوازن ==================
+// ================== بدء التشغيل والربط ==================
 function startBot() {
   service = new WOLF();
 
@@ -204,14 +214,13 @@ function startBot() {
   service.on('messageUpdate', async (message) => {
     const senderId = Number(message.sourceSubscriberId);
     if (!message.isGroup && senderId === XO_BOT_ID) {
-      // فتح القفل عند استقبال تحديث حقيقي للوحة للتجهيز للدور القادم
-      isSending = false; 
+      isSending = false; // فك قفل الحماية فوراً عند استلام التحديث التالي من السيرفر
       handleIncomingData(message);
     }
   });
 
   service.on('ready', async () => {
-    console.log('🚀 تم تفعيل وضع الاكتساح اللانهائي والاستراتيجية الهجومية المستمرة!');
+    console.log('🚀 تم تشغيل النسخة الخفيفة والسريعة! لعب متواصل بدون أي تعليق أو توقف.');
     isBotReady = true;
     reconnecting = false;
     await sleep(2000);
