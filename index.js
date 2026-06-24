@@ -17,8 +17,6 @@ let reconnecting = false;
 let board = Array(9).fill(null); 
 let mySign = 'O';     
 let botSign = 'X';    
-let isMyTurn = false;
-let isProcessingMove = false; 
 
 // ================== خوارزمية الذكاء الاصطناعي لـ XO ==================
 const WINNING_COMBOS = [
@@ -55,10 +53,10 @@ function getBestMove() {
     }
   }
 
-  // 3. خذ المنتصف
+  // 3. خذ المنتصف إذا كان فارغاً
   if (board[4] === null && availableMoves.includes(4)) return 4;
 
-  // 4. الزوايا
+  // 4. خذ الزوايا
   const corners = [0, 2, 6, 8];
   const availableCorners = corners.filter(i => board[i] === null);
   if (availableCorners.length > 0) {
@@ -69,25 +67,16 @@ function getBestMove() {
 }
 
 // ================== تحليل كود الـ HTML المكتشف ==================
-function parseBoard(message) {
+function parseAndPlay(message) {
   const text = (message.body || message.content || '').toLowerCase();
 
-  // تصفير كامل عند بداية جولة جديدة
+  // فحص تصفير جولة جديدة
   if (text.includes('game started') || text.includes('بدأت اللعبة') || text.includes('rematch')) {
-    console.log('🎮 جولة جديدة رُصدت، تصفير البيانات...');
+    console.log('🎮 جولة جديدة رُصدت، إعادة تهيئة اللوحة...');
     board = Array(9).fill(null);
-    isProcessingMove = false;
-    return;
   }
 
-  // تحديد من عليه الدور بناءً على كود الـ HTML المكتشف (Your Turn)
-  if (text.includes('your turn') || text.includes('turn') || text.includes('xobot-mp-private__content__top__turn')) {
-    isMyTurn = true;
-  } else {
-    isMyTurn = false;
-  }
-
-  // تحديد الإشارات بدقة
+  // تحديد الرموز والإشارات الحالية
   if (text.includes('(o)') || text.includes('⭕')) { 
     mySign = 'O'; 
     botSign = 'X'; 
@@ -96,34 +85,47 @@ function parseBoard(message) {
     botSign = 'O'; 
   }
 
-  // تحديث اللوحة بالاعتماد على فحص ذكي للـ HTML المكتشف
+  // تحديث حالة اللوحة بناءً على الأرقام المتبقية في الـ HTML
   for (let i = 0; i < 9; i++) {
     const squareNum = (i + 1).toString();
     
-    // نبحث هل الرقم موجود في كود الـ HTML؟ 
-    // الأرقام تظهر في المربعات الفارغة فقط داخل الـ HTML الخاص باللعبة
+    // المربع الفارغ في كود وولف يحمل الرقم صراحة داخل الـ HTML
     const regex = new RegExp(`>${squareNum}<|"${squareNum}"|\\b${squareNum}\\b`);
     
     if (regex.test(text)) {
-      // الرقم موجود، إذن المربع فارغ تماماً في اللعبة الحالية
-      board[i] = null;
+      board[i] = null; // المربع فارغ ومتاح للعب
     } else {
-      // الرقم اختفى من الـ HTML!
-      // إذا لم نكن نحن من لعبنا فيه، فبالتأكيد الخصم هو من يملكه الآن
+      // إذا اختفى الرقم، ولم نكن نحن من لعبنا فيه سابقاً، فهو للخصم بالتأكيد
       if (board[i] !== mySign) {
         board[i] = botSign;
       }
     }
   }
 
-  console.log(`🤖 رمزي: [ ${mySign} ] | دوري الآن؟ [ ${isMyTurn} ]`);
-  console.log("🔍 حالة اللوحة الحقيقية (الـ HTML):", board.map((v, i) => v || (i + 1)));
+  console.log(`🤖 الرمز الحالي: [ ${mySign} ]`);
+  console.log("🔍 مصفوفة اللوحة الحقيقية:", board.map((v, i) => v || (i + 1)));
 
-  // رصد انتهاء المباراة لإعادة التشغيل تلقائياً
-  if (text.includes('won') || text.includes('lost') || text.includes('draw') || text.includes('تعادل') || text.includes('lost!')) {
-    console.log('🏁 انتهت المباراة! جاري إعادة التشغيل بعد 5 ثوانٍ...');
-    isMyTurn = false;
-    isProcessingMove = false;
+  // فحص إذا كان الدور لنا الآن للعب بشكل صريح وفوري
+  const isMyTurn = text.includes('your turn') || text.includes('turn') || text.includes('xobot-mp-private__content__top__turn');
+
+  if (isMyTurn) {
+    const moveIndex = getBestMove();
+    if (moveIndex !== undefined && moveIndex !== -1) {
+      const squareToPlay = (moveIndex + 1).toString();
+      
+      // تحديث فوري ومحلي للوحة لتجنب التكرار
+      board[moveIndex] = mySign;
+      
+      // إرسال الحركة فوراً
+      setTimeout(async () => {
+        await sendPrivateMessage(XO_BOT_ID, squareToPlay);
+      }, 800); // تأخير بسيط جداً لمنع تعليق الرسائل المتتالية
+    }
+  }
+
+  // إعادة التشغيل عند نهاية الجولة
+  if (text.includes('won') || text.includes('lost') || text.includes('draw') || text.includes('تعادل') || text.includes('fanz')) {
+    console.log('🏁 جولة منتهية! جاري بدء مباراة جديدة بعد 5 ثوانٍ...');
     board = Array(9).fill(null);
     setTimeout(() => {
       sendGroupMessage(ROOM_ID, START_COMMAND);
@@ -146,13 +148,13 @@ async function sendPrivateMessage(targetId, text) {
   if (!service || !isBotReady) return;
   try {
     await service.messaging.sendPrivateMessage(targetId, text);
-    console.log(`🕹️ لعبت المربع: [ ${text} ]`);
+    console.log(`🕹️ تم إرسال الحركة للمربع رقم: [ ${text} ]`);
   } catch (err) {
     console.log('❌ خطأ إرسال خاص:', err.message);
   }
 }
 
-// ================== تشغيل البوت ==================
+// ================== تشغيل وفحص اتصال البوت ==================
 function startBot() {
   service = new WOLF();
 
@@ -163,38 +165,22 @@ function startBot() {
       if (!message.isGroup && senderId === XO_BOT_ID) {
         const text = (message.body || message.content || '').toLowerCase();
         
-        // إذا حاول البوت لعب مربع مستخدم مسبقاً، نفتح القفل ونسجله للخصم فوراً لتصحيح المسار
+        // تصحيح فوري إذا كانت الخانة ممتلئة بالخطأ لفتح المسار مجدداً
         if (text.includes('already been used') || text.includes('used')) {
-          console.log('⚠️ الخانة مستخدمة مسبقاً، جاري التحديث وإعادة المحاولة...');
+          console.log('⚠️ الخانة ممتلئة مسبقاً، إعادة الحساب تلقائياً...');
           const matched = text.match(/\d/);
           if (matched) {
             const usedSquare = parseInt(matched[0]) - 1;
             board[usedSquare] = botSign;
           }
-          isMyTurn = true; 
-          isProcessingMove = false;
+          // نجبر البوت على إعادة فحص اللوحة الحالية واللعب مجدداً في مكان فارغ
+          parseAndPlay(message);
         } else {
-          parseBoard(message);
-        }
-        
-        // اتخاذ قرار اللعب
-        if (isMyTurn && !isProcessingMove) {
-          const moveIndex = getBestMove();
-          if (moveIndex !== undefined && moveIndex !== -1) {
-            const squareToPlay = (moveIndex + 1).toString();
-            
-            isProcessingMove = true; 
-            board[moveIndex] = mySign; 
-            isMyTurn = false; 
-            
-            await sleep(1000); // تأخير ثانية واحدة لضمان وصول الحركة للسيرفر بشكل مستقر
-            await sendPrivateMessage(XO_BOT_ID, squareToPlay);
-          }
+          parseAndPlay(message);
         }
       }
     } catch (err) {
       console.log('❌ خطأ في معالجة الرسالة:', err.message);
-      isProcessingMove = false;
     }
   });
 
@@ -210,7 +196,6 @@ function startBot() {
     if (reconnecting) return;
     reconnecting = true;
     isBotReady = false;
-    isProcessingMove = false;
     setTimeout(startBot, 5000);
   };
 
