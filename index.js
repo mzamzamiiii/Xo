@@ -27,7 +27,7 @@ const WINNING_COMBOS = [
   [0, 4, 8], [2, 4, 6]             
 ];
 
-// ================== استراتيجية الفوز السريعة والمضمونة ==================
+// ================== استراتيجية الوزن الرقمي السريعة والمضمونة ==================
 function getBestMove() {
   const availableMoves = [];
   for (let i = 0; i < 9; i++) {
@@ -145,7 +145,6 @@ function handleIncomingData(message) {
   console.log(`✨ رمزي النشط الآن: [ ${mySign} ] | رمز الخصم: [ ${botSign} ]`);
   console.log("🔍 لوحة اللعبة الحالية:", board.map((v, i) => v || (i + 1)));
 
-  // فحص ما إذا كان الدور دور البوت ولم يتم إرسال حركة حالياً
   const isMyTurn = text.includes('your turn') || text.includes('turn') || text.includes('xobot-mp-private__content__top__turn');
 
   if (isMyTurn && !isGameEnding && !isSending) {
@@ -157,7 +156,6 @@ function handleIncomingData(message) {
       board[moveIndex] = mySign;
       lastPlayedIndex = moveIndex; 
 
-      // توقيت إرسال سريع وآمن (بين ثانية وثانية ونصف) لمنع تجاوز السيرفر لدورك
       const secureDelay = Math.floor(Math.random() * (1300 - 900 + 1)) + 900; 
       console.log(`⏳ معالجة سريعة وخاطفة، تأخير: [ ${secureDelay}ms ] لإرسال الرقم: [ ${squareToPlay} ]`);
       
@@ -168,24 +166,32 @@ function handleIncomingData(message) {
   }
 }
 
-// ================== نظام إرسال متوازن ومحمي مع إعادة محاولة تلقائية ==================
+// ================== نظام إرسال متوازن ومحمي بالتعديل الجديد ==================
 async function sendPrivateMessageWithRetry(targetId, text, attempt = 1) {
   if (!service || !isBotReady) {
     isSending = false;
     return;
   }
+
   try {
     await service.messaging.sendPrivateMessage(targetId, text);
-    console.log(`✅ [وولف استقبل الحركة]: تم تسجيل المربع بنجاح: [ ${text} ]`);
+    console.log(`✅ تم إرسال الرقم بنجاح: [ ${text} ]`);
+
+    // مهم: فك القفل بعد الإرسال حتى لا يعلق البوت
+    setTimeout(() => {
+      isSending = false;
+    }, 1200);
+
   } catch (err) {
     console.log(`⚠️ فشل إرسال رقم [ ${text} ] محاولة [ ${attempt} ]: ${err.message}`);
+
     if (attempt < 3 && !isGameEnding) {
       setTimeout(() => {
         sendPrivateMessageWithRetry(targetId, text, attempt + 1);
       }, 500);
     } else {
-      lastPlayedIndex = -1; 
-      isSending = false; 
+      lastPlayedIndex = -1;
+      isSending = false;
     }
   }
 }
@@ -195,7 +201,7 @@ async function sendGroupMessage(roomId, text) {
   try { await service.messaging.sendGroupMessage(roomId, text); } catch (err) {}
 }
 
-// ================== بدء التشغيل والربط ==================
+// ================== بدء التشغيل والربط والتنصت ==================
 function startBot() {
   service = new WOLF();
 
@@ -211,16 +217,18 @@ function startBot() {
     }
   });
 
+  // التعديل المحدث لـ messageUpdate بناءً على طلبك لضمان الفك الفوري
   service.on('messageUpdate', async (message) => {
     const senderId = Number(message.sourceSubscriberId);
+
     if (!message.isGroup && senderId === XO_BOT_ID) {
-      isSending = false; // فك قفل الحماية فوراً عند استلام التحديث التالي من السيرفر
+      isSending = false;
       handleIncomingData(message);
     }
   });
 
   service.on('ready', async () => {
-    console.log('🚀 تم تشغيل النسخة الخفيفة والسريعة! لعب متواصل بدون أي تعليق أو توقف.');
+    console.log('🚀 تم تحديث نظام الحماية والمؤقتات الذكية! جاهز للتشغيل المستمر.');
     isBotReady = true;
     reconnecting = false;
     await sleep(2000);
