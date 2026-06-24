@@ -18,6 +18,7 @@ let board = Array(9).fill(null);
 let mySign = 'O';     
 let botSign = 'X';    
 let lastPlayedIndex = -1; 
+let isGameEnding = false; // قفل حماية لمنع تكرار طلب اللعبة الجديدة
 
 // ================== خوارزمية الذكاء الاصطناعي لـ XO ==================
 const WINNING_COMBOS = [
@@ -67,11 +68,38 @@ function getBestMove() {
 function handleIncomingData(message) {
   const text = (message.body || message.content || '').toLowerCase();
 
-  // تصفير اللوحة عند رصد كلمة تحديث جديدة أو إعادة تحدي
-  if (text.includes('game started') || text.includes('بدأت اللعبة') || text.includes('rematch') || text.includes('enter \'rematch\'')) {
-    console.log('🔄 تم رصد بداية/تحديث مباراة جديدة، تصفير اللوحة...');
+  // 1. فحص فوري ومباشر لانتهاء المباراة (سواء فوز، خسارة، أو تعادل)
+  if (
+    text.includes('lost') || 
+    text.includes('won') || 
+    text.includes('tie') || 
+    text.includes('draw') || 
+    text.includes('تعادل') || 
+    text.includes('rematch') ||
+    text.includes('expires in')
+  ) {
+    if (!isGameEnding) {
+      isGameEnding = true; // تفعيل القفل لمنع التكرار
+      console.log('🏁 رصد انتهاء المباراة (فوز/خسارة/تعادل)! جاري بدء لعبة جديدة بعد 5 ثوانٍ...');
+      
+      // إعادة تهيئة المتغيرات للمباراة القادمة
+      board = Array(9).fill(null);
+      lastPlayedIndex = -1;
+
+      setTimeout(async () => {
+        await sendGroupMessage(ROOM_ID, START_COMMAND);
+        isGameEnding = false; // فتح القفل للجولة القادمة
+      }, 5000);
+    }
+    return; // التوقف عن تحليل اللوحة لأن المباراة انتهت بالفعل
+  }
+
+  // تصفير اللوحة عند رصد بداية جولة جديدة صريحة
+  if (text.includes('game started') || text.includes('بدأت اللعبة')) {
+    console.log('🎮 بداية جولة جديدة صريحة، تصفير اللوحة...');
     board = Array(9).fill(null);
     lastPlayedIndex = -1;
+    isGameEnding = false;
   }
 
   // تحديد الرموز والإشارات الحالية من الـ HTML
@@ -83,7 +111,7 @@ function handleIncomingData(message) {
     botSign = 'O'; 
   }
 
-  // قراءة المربعات المحدثة برمجياً
+  // قراءة المربعات المحدثة برمجياً من كود الـ HTML لضمان أعلى دقة
   const positions = text.split('xobot-mp-private__content__middle__position');
   if (positions.length > 1) {
     for (let i = 0; i < 9; i++) {
@@ -97,6 +125,7 @@ function handleIncomingData(message) {
       }
     }
   } else {
+    // فلتر احتياطي مبني على الأرقام الصريحة المتبقية
     for (let i = 0; i < 9; i++) {
       const squareNum = (i + 1).toString();
       const regex = new RegExp(`>${squareNum}<|"${squareNum}"|\\b${squareNum}\\b`);
@@ -111,31 +140,21 @@ function handleIncomingData(message) {
   console.log(`🤖 الرمز الحالي: [ ${mySign} ]`);
   console.log("🔍 اللوحة المحدثة لحظياً:", board.map((v, i) => v || (i + 1)));
 
-  // فحص الدور
+  // فحص إذا كان الدور لنا للعب
   const isMyTurn = text.includes('your turn') || text.includes('turn') || text.includes('xobot-mp-private__content__top__turn');
 
-  if (isMyTurn) {
+  if (isMyTurn && !isGameEnding) {
     const moveIndex = getBestMove();
     if (moveIndex !== undefined && moveIndex !== -1 && moveIndex !== lastPlayedIndex) {
       const squareToPlay = (moveIndex + 1).toString();
       
       board[moveIndex] = mySign;
-      lastPlayedIndex = moveIndex; 
+      lastPlayedIndex = moveIndex; // حفظ الحركة لمنع إرسال نفس الرقم مرتين متتاليتين
       
       setTimeout(async () => {
         await sendPrivateMessage(XO_BOT_ID, squareToPlay);
       }, 1000); 
     }
-  }
-
-  // إعادة التشغيل عند الانتهاء
-  if (text.includes('won') || text.includes('lost') || text.includes('draw') || text.includes('تعادل') || text.includes('you lost')) {
-    console.log('🏁 انتهت الجولة الحالية! جاري بدء مباراة جديدة بعد 6 ثوانٍ...');
-    board = Array(9).fill(null);
-    lastPlayedIndex = -1;
-    setTimeout(() => {
-      sendGroupMessage(ROOM_ID, START_COMMAND);
-    }, 6000);
   }
 }
 
@@ -144,7 +163,7 @@ async function sendGroupMessage(roomId, text) {
   if (!service || !isBotReady) return;
   try {
     await service.messaging.sendGroupMessage(roomId, text);
-    console.log(`💬 تم إرسال أمر للغرفة: ${text}`);
+    console.log(`💬 تم إرسال أمر للغرفة لبدء لعبة جديدة: ${text}`);
   } catch (err) {
     console.log('❌ خطأ غرفة:', err.message);
   }
@@ -164,7 +183,7 @@ async function sendPrivateMessage(targetId, text) {
 function startBot() {
   service = new WOLF();
 
-  // 1. التنصت على الرسائل الجديدة (لبداية اللعبة أو رسائل الخطأ)
+  // 1. التنصت على الرسائل الجديدة (لبداية اللعبة أو رسائل الأخطاء)
   service.on('message', async (message) => {
     try {
       const senderId = Number(message.sourceSubscriberId);
@@ -172,7 +191,7 @@ function startBot() {
         const text = (message.body || message.content || '').toLowerCase();
         
         if (text.includes('already been used') || text.includes('used')) {
-          console.log('⚠️ الخانة ممتلئة، إلغاء القفل مؤقتاً...');
+          console.log('⚠️ الخانة مستخدمة، مسح قفل آخر حركة لإعادة المحاولة الحية...');
           lastPlayedIndex = -1;
           return;
         }
@@ -183,12 +202,11 @@ function startBot() {
     }
   });
 
-  // 2. 🔥 الحل السحري: التنصت على تحديث الرسائل اللحظي (Message Update)
+  // 2. التنصت اللحظي الذكي على تحديث وتعديل نفس الرسالة (Message Update)
   service.on('messageUpdate', async (message) => {
     try {
       const senderId = Number(message.sourceSubscriberId);
       if (!message.isGroup && senderId === XO_BOT_ID) {
-        console.log('⚡ تم رصد تحديث للوحة اللعبة (Message Updated) من البوت!');
         handleIncomingData(message);
       }
     } catch (err) {
@@ -197,7 +215,7 @@ function startBot() {
   });
 
   service.on('ready', async () => {
-    console.log('🤖 البوت جاهز تماماً ويتنصت على التحديثات اللحظية الآن!');
+    console.log('🤖 البوت جاهز تماماً ومتصل الآن!');
     isBotReady = true;
     reconnecting = false;
     await sleep(2000);
