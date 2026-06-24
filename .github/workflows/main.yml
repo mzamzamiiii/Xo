@@ -1,3 +1,4 @@
+//// ورك فلو بوت وقت صحيح
 name: Wolf Words Test
 
 on:
@@ -16,16 +17,11 @@ jobs:
         with:
           node-version: '20'
 
-      # هنا قمنا بإجبار السيرفر على تثبيت مكتبة openai مباشرة بجانب بقية المكتبات
       - name: Install dependencies
-        run: |
-          npm install openai --no-audit --no-fund
-          npm install --no-audit --no-fund
+        run: npm install --no-audit --no-fund
 
       - name: Run Bot
         env:
           U_MAIL_1: ${{ secrets.U_MAIL_1 }}
           U_PASS_1: ${{ secrets.U_PASS_1 }}
-          # ⚠️ ضروري جداً تمرير مفتاح الذكاء الاصطناعي للبوت هنا لكي يعمل تخمين الصور
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: npm start
