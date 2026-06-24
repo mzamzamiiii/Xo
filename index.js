@@ -5,7 +5,7 @@ const { WOLF } = wolfjs;
 
 // ================== الإعدادات ==================
 const ROOM_ID = 22249609;        // رقم الغرفة لإرسال أمر البدء
-const XO_BOT_ID = 82727814;      // معرف بوت الـ XO (تأكد من مطابقته لحساب XO Bot)
+const XO_BOT_ID = 82727814;      // معرف بوت الـ XO
 const START_COMMAND = '!xo private ai 3';     // الأمر المستخدم لبدء اللعبة في الغرفة
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -16,12 +16,11 @@ let reconnecting = false;
 
 // مصفوفة تمثل لوحة اللعب (9 خانات)، القيمة تكون 'X' أو 'O' أو فارغة
 let board = Array(9).fill(null); 
-let mySign = 'O';     // الرمز الخاص بك (حسب الصورة "Your Turn (O)" في لقطة الشاشة)
+let mySign = 'O';     // الرمز الخاص بك
 let botSign = 'X';    // رمز الخصم
 let isMyTurn = false;
 
 // ================== خوارزمية الذكاء الاصطناعي لـ XO ==================
-// تحديد الحركات الفائزة
 const WINNING_COMBOS = [
   [0, 1, 2], [3, 4, 5], [6, 7, 8], // أفقي
   [0, 3, 6], [1, 4, 7], [2, 5, 8], // عمودي
@@ -29,12 +28,17 @@ const WINNING_COMBOS = [
 ];
 
 function getBestMove() {
+  // 0. تصفية الحركات المتاحة فعلياً (تأكيد أمان إضافي)
+  const availableMoves = board.map((val, idx) => val === null ? idx : null).filter(val => val !== null);
+  if (availableMoves.length === 0) return undefined;
+
   // 1. هل يمكنني الفوز في هذه الخطوة؟
   for (let combo of WINNING_COMBOS) {
     let myCount = combo.filter(i => board[i] === mySign).length;
     let emptyCount = combo.filter(i => board[i] === null).length;
     if (myCount === 2 && emptyCount === 1) {
-      return combo.find(i => board[i] === null);
+      const move = combo.find(i => board[i] === null);
+      if (availableMoves.includes(move)) return move;
     }
   }
 
@@ -43,12 +47,13 @@ function getBestMove() {
     let botCount = combo.filter(i => board[i] === botSign).length;
     let emptyCount = combo.filter(i => board[i] === null).length;
     if (botCount === 2 && emptyCount === 1) {
-      return combo.find(i => board[i] === null);
+      const move = combo.find(i => board[i] === null);
+      if (availableMoves.includes(move)) return move;
     }
   }
 
-  // 3. خذ المنتصف إذا كان فارغاً (مربع رقم 5، ترتيبه في المصفوفة 4)
-  if (board[4] === null) return 4;
+  // 3. خذ المنتصف إذا كان فارغاً
+  if (board[4] === null && availableMoves.includes(4)) return 4;
 
   // 4. خذ الزوايا الفارغة
   const corners = [0, 2, 6, 8];
@@ -57,46 +62,51 @@ function getBestMove() {
     return availableCorners[Math.floor(Math.random() * availableCorners.length)];
   }
 
-  // 5. اختر أي مربع فارغ متبقي
-  const availableMoves = board.map((val, idx) => val === null ? idx : null).filter(val => val !== null);
+  // 5. اختر أي مربع فارغ متبقي من المتاحة فعلياً
   return availableMoves[Math.floor(Math.random() * availableMoves.length)];
 }
 
 // ================== تحليل لوحة اللعب من رسالة البوت ==================
-// دالة تقوم بتحديث حالة اللوحة بناءً على نص الرسالة أو أزرار الـ Embed القادمة من XO Bot
 function parseBoard(message) {
   const text = (message.body || message.content || '').toLowerCase();
 
-  // إعادة تعيين اللوحة إذا كانت الرسالة تفيد ببدء لعبة جديدة
-  if (text.includes('game started') || text.includes('بدأت اللعبة') || text.includes('your turn')) {
-    // التحقق من الرمز الممنوح لك
-    if (text.includes('(o)')) { mySign = 'O'; botSign = 'X'; }
-    if (text.includes('(x)')) { mySign = 'X'; botSign = 'O'; }
+  // إعادة تعيين اللوحة إذا كانت اللعبة جديدة
+  if (text.includes('game started') || text.includes('بدأت اللعبة')) {
+    console.log('🎮 تم رصد بداية مباراة جديدة، جاري تصفير اللوحة...');
+    board = Array(9).fill(null);
+  }
+
+  // التحقق من الرمز الممنوح لك
+  if (text.includes('(o)') || text.includes('⭕')) { mySign = 'O'; botSign = 'X'; }
+  if (text.includes('(x)') || text.includes('❌')) { mySign = 'X'; botSign = 'O'; }
+  
+  // تحديث حالة اللوحة بدقة بناءً على الأرقام المختفية والموجودة
+  for (let i = 0; i < 9; i++) {
+    const squareNum = (i + 1).toString();
     
-    // إذا أرسل البوت لوحة نصية أو أزرار، نقوم بتحديث الـ board هنا
-    // سنعتمد على الأرقام الموجودة بالرسالة لمعرفة المربعات المتاحة
-    for (let i = 0; i < 9; i++) {
-      const squareNum = (i + 1).toString();
-      // إذا كان رقم المربع موجود في الرسالة (يعني أنه لا يزال فارغاً ومتاحاً للضغط)
-      if (text.includes(squareNum)) {
-        board[i] = null;
-      } else {
-        // إذا اختفى الرقم، يعني أن هناك رمزاً تم وضعه (سنفترض مبدئياً الحركات بناءً على التحديثات المستمرة)
-      }
-    }
-    
-    // محاكاة سريعة لقراءة لقطة الشاشة الأولى: المربع 5 تم لعبه، والمربعات المتبقية تظهر أرقامها
-    // الأفضل في بوتات وولف الحديثة الاعتماد على الأزرار (Group/Private Inline Buttons) إذا كانت متوفرة في كود المطورين
-    
-    if (text.includes('your turn') || text.includes('دورك')) {
-      isMyTurn = true;
+    if (text.includes(squareNum)) {
+      // إذا كان رقم المربع موجود في الرسالة، فهو حتماً فارغ ومتاح
+      board[i] = null;
     } else {
-      isMyTurn = false;
+      // إذا اختفى الرقم، ولم نكن نحن من لعبنا فيه سابقاً، إذن الخصم هو من أخذه
+      if (board[i] !== mySign) {
+        board[i] = botSign;
+      }
     }
   }
   
-  // التحقق من انتهاء اللعبة
-  if (text.includes('won') || text.includes('فاز') || text.includes('draw') || text.includes('تعادل')) {
+  // طباعة اللوحة الحالية في الكونسول لمتابعة ذكاء البوت وسير المباراة
+  console.log("اللوحة الحالية:", board.map((v, i) => v || (i + 1)));
+  
+  // التحقق من من عليه الدور
+  if (text.includes('your turn') || text.includes('دورك')) {
+    isMyTurn = true;
+  } else {
+    isMyTurn = false;
+  }
+  
+  // التحقق من انتهاء اللعبة (فوز، خسارة، أو تعادل)
+  if (text.includes('won') || text.includes('فاز') || text.includes('lost') || text.includes('خسارة') || text.includes('draw') || text.includes('تعادل')) {
     console.log('🏁 انتهت المباراة! جاري بدء مباراة جديدة بعد 5 ثوانٍ...');
     isMyTurn = false;
     board = Array(9).fill(null);
@@ -131,7 +141,6 @@ async function sendPrivateMessage(targetId, text) {
 function startBot() {
   service = new WOLF();
 
-  // الاستماع للرسائل (عام وخاص)
   service.on('message', async (message) => {
     try {
       const senderId = Number(message.sourceSubscriberId);
@@ -143,15 +152,14 @@ function startBot() {
         if (isMyTurn) {
           const moveIndex = getBestMove();
           if (moveIndex !== undefined && moveIndex !== -1) {
-            // المربعات في اللعبة من 1 إلى 9، والمصفوفة من 0 إلى 8، لذلك نزيد 1
             const squareToPlay = (moveIndex + 1).toString();
             
-            // تحديث اللوحة داخلياً بحركتك
+            // تحديث اللوحة داخلياً بحركتك فوراً قبل الإرسال لمنع التكرار
             board[moveIndex] = mySign;
             isMyTurn = false;
             
-            // تأخير بسيط (نصف ثانية) حتى يبدو اللعب طبيعياً ولا يحظر الحساب
-            await sleep(500); 
+            // تأخير بسيط طبيعي
+            await sleep(600); 
             await sendPrivateMessage(XO_BOT_ID, squareToPlay);
           }
         }
@@ -167,11 +175,9 @@ function startBot() {
     reconnecting = false;
 
     await sleep(2000);
-    // إرسال الأمر للغرفة عند التشغيل لأول مرة لبدء السلسلة
     await sendGroupMessage(ROOM_ID, START_COMMAND);
   });
 
-  // إعادة الاتصال التلقائي
   const restart = () => {
     if (reconnecting) return;
     reconnecting = true;
