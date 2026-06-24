@@ -1,4 +1,4 @@
-name: Wolf Bot Clean Run
+name: Wolf Words Test
 
 on:
   workflow_dispatch:
@@ -8,19 +8,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: '20'
 
       - name: Install dependencies
-        run: npm install
+        run: npm install --no-audit --no-fund
 
-      - name: Run bot
+      - name: Run Bot
         env:
           U_MAIL_1: ${{ secrets.U_MAIL_1 }}
           U_PASS_1: ${{ secrets.U_PASS_1 }}
-        run: node app.js
+        run: npm start
