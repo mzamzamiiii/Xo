@@ -35,7 +35,7 @@ function getBestMove() {
   
   if (availableMoves.length === 0) return undefined;
 
-  // 1. اقتناص الفوز الفوري
+  // 1. اقتناص الفوز الفوري (أولوية قصوى)
   for (let combo of WINNING_COMBOS) {
     let myCount = combo.filter(i => board[i] === mySign).length;
     let emptyCount = combo.filter(i => board[i] === null).length;
@@ -114,8 +114,7 @@ function handleIncomingData(message) {
   ) {
     if (!isGameEnding) {
       isGameEnding = true; 
-      console.log('🏁 جولة منتهية. جاري طلب مباراة جديدة بعد 6 ثوانٍ للأمان ضد الحظر...');
-      
+      console.log('🏁 جولة منتهية. جاري طلب مباراة جديدة بعد 6 ثوانٍ...');
       board = Array(9).fill(null);
       lastPlayedIndex = -1;
 
@@ -134,17 +133,18 @@ function handleIncomingData(message) {
     isGameEnding = false;
   }
 
-  // كشف الرموز
-  if (text.includes('(o)') || text.includes('⭕') || text.includes('filter: hue-rotate(210deg)')) { 
+  // كشف الرموز بشكل صحيح ودقيق
+  if (text.includes('(o)') || text.includes('⭕') || text.includes('filter: hue-rotate(210deg)') || text.includes('turn! (⭕)')) { 
     mySign = 'O'; 
     botSign = 'X'; 
-  } else if (text.includes('(x)') || text.includes('❌')) { 
+  } else if (text.includes('(x)') || text.includes('❌') || text.includes('turn! (❌)')) { 
     mySign = 'X'; 
     botSign = 'O'; 
   }
 
-  // قراءة اللوحة من الـ HTML المحدث
+  // تفكيك وقراءة مصفوفة اللوحة من كتل الأزرار (طريقة شديدة الدقة)
   const positions = text.split('xobot-mp-private__content__middle__position');
+  
   if (positions.length > 1) {
     for (let i = 0; i < 9; i++) {
       const block = positions[i + 1] || '';
@@ -153,23 +153,25 @@ function handleIncomingData(message) {
       } else if (block.includes('--o') || block.includes('⭕') || block.includes('position--o')) {
         board[i] = 'O';
       } else {
-        board[i] = null; 
+        board[i] = null; // الخانة فارغة تماماً وجاهزة للعب
       }
     }
   } else {
+    // طريقة فحص احتياطية معتمدة على الأرقام الصريحة المتبقية على الأزرار
     for (let i = 0; i < 9; i++) {
       const squareNum = (i + 1).toString();
-      const regex = new RegExp(`>${squareNum}<|"${squareNum}"|\\b${squareNum}\\b`);
-      if (regex.test(text)) {
+      // إذا كان رقم المربع موجوداً في النص، فهو فارغ حتماً
+      if (text.includes(`>${squareNum}<`) || text.includes(`"${squareNum}"`) || text.includes(` ${squareNum} `)) {
         board[i] = null;
       } else if (board[i] === null) {
+        // إذا اختفى الرقم ولم نسجل فيه حركة من قبل، فهو بالتأكيد للخصم
         board[i] = botSign; 
       }
     }
   }
 
-  console.log(`🤖 الرمز الحالي: [ ${mySign} ]`);
-  console.log("🔍 اللوحة المحدثة لحظياً:", board.map((v, i) => v || (i + 1)));
+  console.log(`🤖 الرمز الحالي للبوت: [ ${mySign} ] | رمز الخصم: [ ${botSign} ]`);
+  console.log("🔍 مصفوفة اللوحة الحقيقية:", board.map((v, i) => v || (i + 1)));
 
   const isMyTurn = text.includes('your turn') || text.includes('turn') || text.includes('xobot-mp-private__content__top__turn');
 
@@ -181,9 +183,8 @@ function handleIncomingData(message) {
       board[moveIndex] = mySign;
       lastPlayedIndex = moveIndex; 
 
-      // 🛡️ آلية الأمان: وقت عشوائي ذكي لمنع الحظر ومحاكاة اللعب البشري
       const secureDelay = Math.floor(Math.random() * (2500 - 1500 + 1)) + 1500;
-      console.log(`⏳ تأخير أمان لحماية الحساب: [ ${secureDelay}ms ] ثم إرسال الحركة...`);
+      console.log(`⏳ تأخير أمان آمن: [ ${secureDelay}ms ] ثم إرسال الحركة للمربع: [ ${squareToPlay} ]`);
       
       setTimeout(async () => {
         await sendPrivateMessage(XO_BOT_ID, squareToPlay);
@@ -247,7 +248,7 @@ function startBot() {
   });
 
   service.on('ready', async () => {
-    console.log('🛡️ تم تشغيل وضع الاكتساح الذكي مع تفعيل جدار الحماية ضد الحظر!');
+    console.log('🛡️ تم تفعيل البوت المصلح بالكامل؛ جاهز للفوز الفوري ومنع الأخطاء!');
     isBotReady = true;
     reconnecting = false;
     await sleep(2000);
