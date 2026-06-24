@@ -3,93 +3,138 @@ import wolfjs from 'wolf.js';
 
 const { WOLF } = wolfjs;
 
-const ROOM_ID = 18187126;
-const TARGET_USER_ID = 75423789;
+// ================== الإعدادات ==================
+const ROOM_ID = 81971125;
+
+// حط هنا ID الحساب/البوت اللي يرسل رسالة الوقت
+const TARGET_USER_ID = 26494626;
+
+// الأمر الذي يبدأ اللعبة
+const START_COMMAND = '!وقت';
+
+// تقديم بسيط قبل الوقت لتعويض تأخير الإرسال والشبكة
+// إذا يرسل متأخر قلل الرقم، وإذا يرسل بدري زوده
+const SEND_LEAD_MS = 0;
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 let service = null;
-let queue = [];
-let isProcessing = false;
 let reconnecting = false;
 let isBotReady = false;
 let lastQuestionTime = Date.now();
+let activeTimer = null;
 
+// ================== قراءة نص الرسالة ==================
 function getMessageText(message) {
   return (message.body || message.content || message.text || message.message || '').trim();
 }
 
+// ================== استخراج رقم الغرفة ==================
 function getRoomId(message) {
   return Number(
-    message.targetGroupId || message.groupId || message.channelId || message.recipientGroupId || message.group?.id || 0
+    message.targetGroupId ||
+    message.groupId ||
+    message.channelId ||
+    message.recipientGroupId ||
+    message.group?.id ||
+    0
   );
 }
 
-function extractWord(text) {
-  const match = text.match(/\|-->\s*(.*?)\s*<--\|/);
-  return match ? match[1].trim() : null;
+// ================== تحويل الأرقام العربية إلى إنجليزية ==================
+function normalizeNumbers(text) {
+  const arabic = '٠١٢٣٤٥٦٧٨٩';
+  const hindi = '۰۱۲۳۴۵۶۷۸۹';
+
+  return text.replace(/[٠-٩۰-۹]/g, (d) => {
+    if (arabic.includes(d)) return arabic.indexOf(d);
+    if (hindi.includes(d)) return hindi.indexOf(d);
+    return d;
+  });
 }
 
-function reverseText(text) {
-  return [...text].reverse().join('');
+// ================== استخراج الكلمة والوقت من الرسالة ==================
+function parseTimingMessage(text) {
+  const cleanText = normalizeNumbers(text);
+
+  // استخراج الكلمة بين { }
+  const wordMatch = cleanText.match(/\{([^}]+)\}/);
+  if (!wordMatch) return null;
+
+  const answer = wordMatch[1].trim();
+
+  // استخراج عدد الثواني
+  const timeMatch = cleanText.match(/(\d+(?:\.\d+)?)\s*(ثانية|ثواني|ثوان|second|seconds)/i);
+  if (!timeMatch) return null;
+
+  const seconds = Number(timeMatch[1]);
+
+  if (!answer || !seconds || seconds <= 0) return null;
+
+  return {
+    answer,
+    delayMs: seconds * 1000
+  };
 }
 
-function withTimeout(promise, ms) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error('Send timeout')), ms))
-  ]);
-}
-
+// ================== إرسال رسالة ==================
 async function send(roomId, text) {
   try {
     if (!service || !isBotReady) return false;
 
-    // تم ضبط المهلة على 400ms ثابتة بناءً على طلبك لزيادة السرعة وحصد النقاط
-    const fixedDelay = 300;
-    await sleep(fixedDelay);
+    await service.messaging.sendGroupMessage(roomId, text);
 
-    await withTimeout(
-      service.messaging.sendGroupMessage(roomId, text),
-      5000
-    );
-
-    console.log(`🚀 تم الإرسال السريع [ ${text} ] بعد ${fixedDelay}ms`);
+    console.log(`🚀 تم الإرسال: ${text}`);
     return true;
 
   } catch (err) {
-    console.log('❌ فشل الإرسال السريع:', err.message);
+    console.log('❌ فشل الإرسال:', err.message);
     return false;
   }
 }
 
-async function processQueue() {
-  if (isProcessing) return;
-  isProcessing = true;
-
-  while (queue.length > 0) {
-    const item = queue.shift();
-    console.log('--------------------');
-    console.log('الكلمة المستلمة:', item.word);
-    console.log('الإجابة المعكوسة:', item.answer);
-
-    const success = await send(item.roomId, item.answer);
-    await sleep(success ? 500 : 2000); // مهلة سريعة بين العناصر في الطابور
+// ================== جدولة الإرسال بالوقت الصحيح ==================
+function scheduleAnswer(roomId, answer, delayMs) {
+  if (activeTimer) {
+    clearTimeout(activeTimer);
+    activeTimer = null;
   }
 
-  isProcessing = false;
+  const finalDelay = Math.max(0, delayMs - SEND_LEAD_MS);
+
+  console.log('--------------------');
+  console.log('✅ الكلمة المطلوبة:', answer);
+  console.log('⏱️ الوقت المطلوب:', delayMs / 1000, 'ثانية');
+  console.log('🚀 سيتم الإرسال بعد:', finalDelay, 'ms');
+
+  activeTimer = setTimeout(async () => {
+    await send(roomId, answer);
+    activeTimer = null;
+
+    await sleep(1000);
+    await send(ROOM_ID, START_COMMAND);
+
+  }, finalDelay);
 }
 
+// ================== إعادة تشغيل البوت ==================
 async function restartBot(reason) {
   if (reconnecting) return;
+
   reconnecting = true;
   isBotReady = false;
+
   console.log('🔄 إعادة تشغيل البوت بسبب:', reason);
 
   try {
+    if (activeTimer) {
+      clearTimeout(activeTimer);
+      activeTimer = null;
+    }
+
     if (service) {
       service.removeAllListeners();
-      await service.logout().catch(() => {}); 
+      await service.logout().catch(() => {});
     }
   } catch {}
 
@@ -97,6 +142,7 @@ async function restartBot(reason) {
   startBot();
 }
 
+// ================== تشغيل البوت ==================
 function startBot() {
   service = new WOLF();
 
@@ -106,23 +152,16 @@ function startBot() {
       const roomId = getRoomId(message);
       const text = getMessageText(message);
 
-      if (!text || !message.isGroup || roomId !== ROOM_ID) return;
-
-      if (senderId === TARGET_USER_ID) {
-        lastQuestionTime = Date.now(); 
-      }
-
+      if (!text || !message.isGroup) return;
+      if (roomId !== ROOM_ID) return;
       if (senderId !== TARGET_USER_ID) return;
 
-      const word = extractWord(text);
-      if (!word) return;
+      lastQuestionTime = Date.now();
 
-      const answer = reverseText(word);
+      const parsed = parseTimingMessage(text);
+      if (!parsed) return;
 
-      queue.push({ roomId, word, answer });
-      console.log('📥 كلمة جديدة دخلت الطابور:', word);
-
-      processQueue();
+      scheduleAnswer(roomId, parsed.answer, parsed.delayMs);
 
     } catch (err) {
       console.log('❌ Message Error:', err.message);
@@ -130,13 +169,13 @@ function startBot() {
   });
 
   service.on('ready', async () => {
-    console.log('✅ الحساب جاهز ومستقر الآن للسرعة القصوى');
+    console.log('✅ الحساب جاهز');
     isBotReady = true;
-    reconnecting = false; 
+    reconnecting = false;
     lastQuestionTime = Date.now();
 
     await sleep(2000);
-    await send(ROOM_ID, '!عكس');
+    await send(ROOM_ID, START_COMMAND);
   });
 
   service.on('error', () => restartBot('service error'));
@@ -149,15 +188,15 @@ function startBot() {
   });
 }
 
-// مراقب التنشيط والتخطي التلقائي عند تعليق الأسئلة
+// ================== مراقب التعليق ==================
 setInterval(async () => {
-  if (service && isBotReady && !isProcessing && queue.length === 0) {
+  if (service && isBotReady && !activeTimer) {
     const timeSinceLastQuestion = Date.now() - lastQuestionTime;
-    
-    if (timeSinceLastQuestion > 15000) { 
-      console.log('⚠️ اللعبة معلقة. جاري تنشيط الغرفة بتنزيل سؤال جديد...');
+
+    if (timeSinceLastQuestion > 20000) {
+      console.log('⚠️ لم تصل رسالة وقت. جاري طلب سؤال جديد...');
       lastQuestionTime = Date.now();
-      await send(ROOM_ID, '!عكس');
+      await send(ROOM_ID, START_COMMAND);
     }
   }
 }, 5000);
