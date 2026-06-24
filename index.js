@@ -3,7 +3,6 @@ import wolfjs from 'wolf.js';
 
 const { WOLF } = wolfjs;
 
-// ================== الإعدادات ==================
 const ROOM_ID = 22249609;        
 const XO_BOT_ID = 82727814;      
 const START_COMMAND = '!xo private ai 3';     
@@ -14,192 +13,78 @@ let service = null;
 let isBotReady = false;
 let reconnecting = false;
 
-let board = Array(9).fill(null); 
-let mySign = 'O';     
-let botSign = 'X';    
-let isMyTurn = false;
-let isProcessingMove = false; 
+// كود الفحص لمعرفة هيكلة رسالة اللعبة
+service = new WOLF();
 
-// ================== خوارزمية الذكاء الاصطناعي لـ XO ==================
-const WINNING_COMBOS = [
-  [0, 1, 2], [3, 4, 5], [6, 7, 8], 
-  [0, 3, 6], [1, 4, 7], [2, 5, 8], 
-  [0, 4, 8], [2, 4, 6]             
-];
-
-function getBestMove() {
-  const availableMoves = [];
-  for (let i = 0; i < 9; i++) {
-    if (board[i] === null) availableMoves.push(i);
-  }
-  
-  if (availableMoves.length === 0) return undefined;
-
-  // 1. هل يمكنني الفوز في هذه الخطوة؟
-  for (let combo of WINNING_COMBOS) {
-    let myCount = combo.filter(i => board[i] === mySign).length;
-    let emptyCount = combo.filter(i => board[i] === null).length;
-    if (myCount === 2 && emptyCount === 1) {
-      const move = combo.find(i => board[i] === null);
-      if (availableMoves.includes(move)) return move;
-    }
-  }
-
-  // 2. منع الخصم من الفوز
-  for (let combo of WINNING_COMBOS) {
-    let botCount = combo.filter(i => board[i] === botSign).length;
-    let emptyCount = combo.filter(i => board[i] === null).length;
-    if (botCount === 2 && emptyCount === 1) {
-      const move = combo.find(i => board[i] === null);
-      if (availableMoves.includes(move)) return move;
-    }
-  }
-
-  // 3. خذ المنتصف
-  if (board[4] === null && availableMoves.includes(4)) return 4;
-
-  // 4. الزوايا
-  const corners = [0, 2, 6, 8];
-  const availableCorners = corners.filter(i => board[i] === null);
-  if (availableCorners.length > 0) {
-    return availableCorners[Math.floor(Math.random() * availableCorners.length)];
-  }
-
-  return availableMoves[Math.floor(Math.random() * availableMoves.length)];
-}
-
-// ================== تحليل لوحة اللعب الفعلي ==================
-function parseBoard(message) {
-  const text = (message.body || message.content || '').toLowerCase();
-
-  // تصفير كامل عند بداية الجولة الجديدة
-  if (text.includes('game started') || text.includes('بدأت اللعبة')) {
-    console.log('🎮 بداية جولة جديدة وتصفير اللوحة...');
-    board = Array(9).fill(null);
-    isProcessingMove = false;
-  }
-
-  // تحديد الرموز بحسب نص الدور الصادر من اللعبة
-  if (text.includes('(o)') || text.includes('⭕')) { 
-    mySign = 'O'; 
-    botSign = 'X'; 
-  } else if (text.includes('(x)') || text.includes('❌')) { 
-    mySign = 'X'; 
-    botSign = 'O'; 
-  }
-
-  // نقرأ مصفوفة الأزرار (Form Rows) إن وجدت في تطبيق وولف، وإلا نعتمد على الأرقام الصريحة المتبقية فقط
-  // لمنع قراءة الأرقام الوهمية خارج مربعات اللعب:
-  for (let i = 0; i < 9; i++) {
-    const squareNum = (i + 1).toString();
-    
-    // إذا ثبتنا حركتنا مسبقاً لا نغيرها
-    if (board[i] === mySign) continue;
-
-    // نبحث هل الرقم موجود كخيار متاح أم اختفى؟
-    // قمنا بوضع قيود صارمة (وجود مسافات أو أسطر جديدة حول الرقم) لضمان أنه يمثل المربع داخل الشبكة فقط
-    const regex = new RegExp(`(?:^|\\s|\\n)${squareNum}(?:\\s|\\n|$|\\b)`);
-    
-    if (regex.test(text)) {
-      board[i] = null; 
-    } else {
-      // إذا اختفى الرقم تماماً من شبكة اللعب، فهو بالتأكيد للخصم
-      board[i] = botSign; 
-    }
-  }
-
-  console.log(`🤖 رمزي الحالي: [ ${mySign} ] | رمز الخصم: [ ${botSign} ]`);
-  console.log("🔍 مصفوفة اللوحة الحقيقية:", board.map((v, i) => v || (i + 1)));
-
-  if (text.includes('your turn') || text.includes('دورك')) {
-    isMyTurn = true;
-  } else {
-    isMyTurn = false;
-  }
-
-  if (text.includes('won') || text.includes('فاز') || text.includes('lost') || text.includes('خسارة') || text.includes('draw') || text.includes('تعادل')) {
-    console.log('🏁 انتهت المباراة!');
-    isMyTurn = false;
-    isProcessingMove = false;
-    board = Array(9).fill(null);
-    setTimeout(() => {
-      sendGroupMessage(ROOM_ID, START_COMMAND);
-    }, 5000);
-  }
-}
-
-// ================== إرسال الرسائل ==================
-async function sendGroupMessage(roomId, text) {
-  if (!service || !isBotReady) return;
+service.on('message', async (message) => {
   try {
-    await service.messaging.sendGroupMessage(roomId, text);
-  } catch (err) {
-    console.log('❌ خطأ إرسال للغرفة:', err.message);
-  }
-}
-
-async function sendPrivateMessage(targetId, text) {
-  if (!service || !isBotReady) return;
-  try {
-    await service.messaging.sendPrivateMessage(targetId, text);
-    console.log(`🕹️ لعبت المربع: [ ${text} ]`);
-  } catch (err) {
-    console.log('❌ خطأ إرسال خاص:', err.message);
-  }
-}
-
-// ================== تشغيل البوت ==================
-function startBot() {
-  service = new WOLF();
-
-  service.on('message', async (message) => {
-    try {
-      const senderId = Number(message.sourceSubscriberId);
+    const senderId = Number(message.sourceSubscriberId);
+    
+    // فحص الرسائل القادمة من بوت الـ XO فقط
+    if (!message.isGroup && senderId === XO_BOT_ID) {
+      console.log('\n=================== 📥 رسالة جديدة من بوت اللعبة ===================');
       
-      if (!message.isGroup && senderId === XO_BOT_ID) {
-        parseBoard(message);
-        
-        if (isMyTurn && !isProcessingMove) {
-          const moveIndex = getBestMove();
-          if (moveIndex !== undefined && moveIndex !== -1) {
-            const squareToPlay = (moveIndex + 1).toString();
-            
-            isProcessingMove = true; 
-            board[moveIndex] = mySign; 
-            isMyTurn = false; 
-            
-            await sleep(1000); 
-            await sendPrivateMessage(XO_BOT_ID, squareToPlay);
-          }
-        }
+      // 1. طباعة النص العادي المصاحب للرسالة
+      console.log('📄 النص المستلم (body):', JSON.stringify(message.body || message.content));
+      
+      // 2. فحص الأزرار التفاعلية (Forms)
+      if (message.form) {
+        console.log('🔘 تم رصد أزرار تفاعلية (Form)! تفاصيل الأسطر والأزرار:');
+        console.dir(message.form, { depth: null, colors: true });
+      } else {
+        console.log('🔘 لا توجد أزرار تفاعلية (Form) مباشرة في الرسالة.');
       }
-    } catch (err) {
-      console.log('❌ Error:', err.message);
-      isProcessingMove = false;
+
+      // 3. فحص الإضافات المدمجة الأخرى (Embeds / Metadata)
+      if (message.embeds || message.attachments) {
+        console.log('📦 ممتلكات إضافية مدمجة:');
+        console.log('Embeds:', JSON.stringify(message.embeds));
+        console.log('Attachments:', JSON.stringify(message.attachments));
+      }
+
+      console.log('==================================================================\n');
+
+      // حركة تلقائية سريعة للحفاظ على استمرار الجولة أثناء الفحص
+      const text = (message.body || message.content || '').toLowerCase();
+      if (text.includes('your turn') || text.includes('دورك')) {
+        // نلعب حركة عشوائية مؤقتاً لتستمر اللعبة ونلتقط الرسالة التالية
+        const randomMove = (Math.floor(Math.random() * 9) + 1).toString();
+        await sleep(1000);
+        await service.messaging.sendPrivateMessage(XO_BOT_ID, randomMove);
+        console.log(`🕹️ حركة تجريبية عشوائية للحفاظ على الجولة: [ ${randomMove} ]`);
+      }
+
+      if (text.includes('won') || text.includes('فاز') || text.includes('lost') || text.includes('خسارة') || text.includes('draw') || text.includes('تعادل')) {
+        console.log('🏁 انتهت جولة الفحص، إعادة التشغيل بعد 5 ثوانٍ للاستمرار...');
+        setTimeout(() => {
+          service.messaging.sendGroupMessage(ROOM_ID, START_COMMAND);
+        }, 5000);
+      }
     }
-  });
+  } catch (err) {
+    console.log('❌ خطأ أثناء الفحص:', err.message);
+  }
+});
 
-  service.on('ready', async () => {
-    console.log('🤖 البوت جاهز ومسجل الدخول!');
-    isBotReady = true;
+service.on('ready', async () => {
+  console.log('🤖 كود التجسس والفحص جاهز ومتصل الآن!');
+  isBotReady = true;
+  reconnecting = false;
+  await sleep(2000);
+  await service.messaging.sendGroupMessage(ROOM_ID, START_COMMAND);
+});
+
+const restart = () => {
+  if (reconnecting) return;
+  reconnecting = true;
+  setTimeout(() => {
     reconnecting = false;
-    await sleep(2000);
-    await sendGroupMessage(ROOM_ID, START_COMMAND);
-  });
+    service.login(process.env.U_MAIL_1, process.env.U_PASS_1).catch(restart);
+  }, 5000);
+};
 
-  const restart = () => {
-    if (reconnecting) return;
-    reconnecting = true;
-    isBotReady = false;
-    isProcessingMove = false;
-    setTimeout(startBot, 5000);
-  };
+service.on('error', restart);
+service.on('disconnected', restart);
+service.on('close', restart);
 
-  service.on('error', restart);
-  service.on('disconnected', restart);
-  service.on('close', restart);
-
-  service.login(process.env.U_MAIL_1, process.env.U_PASS_1).catch(restart);
-}
-
-startBot();
+service.login(process.env.U_MAIL_1, process.env.U_PASS_1).catch(restart);
