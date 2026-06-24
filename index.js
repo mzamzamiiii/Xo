@@ -16,8 +16,8 @@ let reconnecting = false;
 
 // مصفوفة تمثل لوحة اللعب (9 خانات)، القيمة تكون 'X' أو 'O' أو فارغة
 let board = Array(9).fill(null); 
-let mySign = 'O';     // الرمز الخاص بك
-let botSign = 'X';    // رمز الخصم
+let mySign = 'O';     
+let botSign = 'X';    
 let isMyTurn = false;
 
 // ================== خوارزمية الذكاء الاصطناعي لـ XO ==================
@@ -28,8 +28,12 @@ const WINNING_COMBOS = [
 ];
 
 function getBestMove() {
-  // 0. تصفية الحركات المتاحة فعلياً (تأكيد أمان إضافي)
-  const availableMoves = board.map((val, idx) => val === null ? idx : null).filter(val => val !== null);
+  // تصفية الحركات المتاحة فعلياً بناءً على مربعات الـ null فقط
+  const availableMoves = [];
+  for (let i = 0; i < 9; i++) {
+    if (board[i] === null) availableMoves.push(i);
+  }
+  
   if (availableMoves.length === 0) return undefined;
 
   // 1. هل يمكنني الفوز في هذه الخطوة؟
@@ -42,7 +46,7 @@ function getBestMove() {
     }
   }
 
-  // 2. هل يمكن للخصم الفوز؟ (قم بحشره/منعه)
+  // 2. هل يمكن للخصم الفوز؟ حشره
   for (let combo of WINNING_COMBOS) {
     let botCount = combo.filter(i => board[i] === botSign).length;
     let emptyCount = combo.filter(i => board[i] === null).length;
@@ -52,66 +56,64 @@ function getBestMove() {
     }
   }
 
-  // 3. خذ المنتصف إذا كان فارغاً
+  // 3. خذ المنتصف
   if (board[4] === null && availableMoves.includes(4)) return 4;
 
-  // 4. خذ الزوايا الفارغة
+  // 4. الزوايا
   const corners = [0, 2, 6, 8];
   const availableCorners = corners.filter(i => board[i] === null);
   if (availableCorners.length > 0) {
     return availableCorners[Math.floor(Math.random() * availableCorners.length)];
   }
 
-  // 5. اختر أي مربع فارغ متبقي من المتاحة فعلياً
+  // 5. حركة عشوائية من المتاح
   return availableMoves[Math.floor(Math.random() * availableMoves.length)];
 }
 
-// ================== تحليل لوحة اللعب من رسالة البوت ==================
+// ================== تحليل لوحة اللعب الذكي ==================
 function parseBoard(message) {
   const text = (message.body || message.content || '').toLowerCase();
 
-  // إعادة تعيين اللوحة إذا كانت اللعبة جديدة
+  // تصفير عند البداية
   if (text.includes('game started') || text.includes('بدأت اللعبة')) {
-    console.log('🎮 تم رصد بداية مباراة جديدة، جاري تصفير اللوحة...');
+    console.log('🎮 بداية مباراة جديدة...');
     board = Array(9).fill(null);
   }
 
-  // التحقق من الرمز الممنوح لك
+  // تحديد العلامات بدقة
   if (text.includes('(o)') || text.includes('⭕')) { mySign = 'O'; botSign = 'X'; }
   if (text.includes('(x)') || text.includes('❌')) { mySign = 'X'; botSign = 'O'; }
-  
-  // تحديث حالة اللوحة بدقة باستخدام RegExp لمنع الخلط مع أرقام الوقت (مثل 10:15)
+
+  // طريقة مبتكرة: نعتمد أولاً على فحص النص المباشر للمربعات محاطة بمسافات لضمان عدم التداخل مع التوقيت
   for (let i = 0; i < 9; i++) {
     const squareNum = (i + 1).toString();
     
-    // فحص الرقم ككلمة مستقلة منفصلة بمسافات أو حدود نصية وليس جزءاً من وقت
-    const regex = new RegExp(`\\b${squareNum}\\b`);
-    const isSquareAvailable = regex.test(text);
+    // إذا كان المربع يحتوي على علامتي أنا (التي لعبتها مسبقاً)، نثبتها
+    if (board[i] === mySign) continue;
 
-    if (isSquareAvailable) {
-      // إذا كان رقم المربع موجود في الرسالة، فهو حتماً فارغ ومتاح
-      board[i] = null;
+    // فحص دقيق: هل الرقم موجود بشكل صريح كأزرار أو نص منفصل؟
+    // إذا وجدنا الرقم 1-9 محاطاً بحدود نصية أو كان البوت يعرض اللوحة بشكل شبكة
+    const regex = new RegExp(`\\b${squareNum}\\b`);
+    
+    if (regex.test(text)) {
+      board[i] = null; // المربع فارغ ومتاح
     } else {
-      // إذا اختفى الرقم، ولم نكن نحن من لعبنا فيه سابقاً، إذن الخصم هو من أخذه
-      if (board[i] !== mySign) {
-        board[i] = botSign;
-      }
+      board[i] = botSign; // الرقم اختفى تماماً ولم نلعبه نحن، إذن هو للخصم
     }
   }
-  
-  // طباعة اللوحة الحالية في الكونسول للمتابعة وسير المباراة
-  console.log("اللوحة الحالية المحدثة:", board.map((v, i) => v || (i + 1)));
-  
-  // التحقق من من عليه الدور
+
+  console.log("🔍 حالة اللوحة الحقيقية:", board.map((v, i) => v || (i + 1)));
+
+  // من عليه الدور؟
   if (text.includes('your turn') || text.includes('دورك')) {
     isMyTurn = true;
   } else {
     isMyTurn = false;
   }
-  
-  // التحقق من انتهاء اللعبة (فوز، خسارة، أو تعادل)
+
+  // انتهاء اللعبة
   if (text.includes('won') || text.includes('فاز') || text.includes('lost') || text.includes('خسارة') || text.includes('draw') || text.includes('تعادل')) {
-    console.log('🏁 انتهت المباراة! جاري بدء مباراة جديدة بعد 5 ثوانٍ...');
+    console.log('🏁 انتهت المباراة! إعادة تشغيل بعد 5 ثوانٍ...');
     isMyTurn = false;
     board = Array(9).fill(null);
     setTimeout(() => {
@@ -135,9 +137,9 @@ async function sendPrivateMessage(targetId, text) {
   if (!service || !isBotReady) return;
   try {
     await service.messaging.sendPrivateMessage(targetId, text);
-    console.log(`🕹️ لعبت المربع رقم: ${text}`);
+    console.log(`🕹️ تم إرسال الحركة: المربع رقم [ ${text} ]`);
   } catch (err) {
-    console.log('❌ فشل اللعب في الخاص:', err.message);
+    console.log('❌ فشل اللعب:', err.message);
   }
 }
 
@@ -149,35 +151,35 @@ function startBot() {
     try {
       const senderId = Number(message.sourceSubscriberId);
       
-      // التعامل مع رسائل الخاص القادمة من بوت اللعبة XO Bot
       if (!message.isGroup && senderId === XO_BOT_ID) {
         const text = (message.body || message.content || '').toLowerCase();
         
-        // جدار حماية ذكي: إذا تم رفض الرقم لأن اللعبة اعتبرته مستخدماً مسبقاً
+        // إذا واجهنا خطأ التكرار، نقوم فوراً بتحديث الخانة وتصحيحها ذكياً
         if (text.includes('already been used') || text.includes('مستخدم مسبقاً')) {
-          console.log('⚠️ تم رصد محاولة لعب مربع مستخدم مسبقاً، جاري تصحيح اللوحة فوراً...');
-          for (let i = 1; i <= 9; i++) {
-            if (text.includes(i.toString()) && board[i - 1] !== mySign) {
-              board[i - 1] = botSign; // تسجيل المربع للخصم تلقائياً لتفادي تكراره
+          // استخراج الرقم المرفوض لتسجيله للخصم فوراً
+          const matched = text.match(/\d/);
+          if (matched) {
+            const usedSquare = parseInt(matched[0]) - 1;
+            if (board[usedSquare] !== mySign) {
+              board[usedSquare] = botSign;
             }
           }
-          isMyTurn = true; // إعادة تمكين الدور للتعويض واختيار حقل آخر
+          isMyTurn = true; // نمنحه فرصة اللعب فوراً بدون انتظار
         } else {
           parseBoard(message);
         }
         
-        // اتخاذ قرار اللعب وإرسال الحركة
         if (isMyTurn) {
           const moveIndex = getBestMove();
           if (moveIndex !== undefined && moveIndex !== -1) {
             const squareToPlay = (moveIndex + 1).toString();
             
-            // تحديث اللوحة داخلياً بحركتك فوراً قبل الإرسال لمنع التكرار المتتالي
+            // قفل الحركة داخلياً قبل الإرسال لمنع التكرار المتزامن (Race Condition)
             board[moveIndex] = mySign;
-            isMyTurn = false;
+            isMyTurn = false; 
             
-            // تأخير بسيط لمحاكاة اللعب الطبيعي واستقرار الاستجابة
-            await sleep(600); 
+            // زيادة التأخير لـ 900ms لضمان وصول تحديث اللعبة من سيرفرات وولف قبل الحركة التالية
+            await sleep(900); 
             await sendPrivateMessage(XO_BOT_ID, squareToPlay);
           }
         }
@@ -191,7 +193,6 @@ function startBot() {
     console.log('🤖 بوت الـ XO جاهز ومسجل الدخول!');
     isBotReady = true;
     reconnecting = false;
-
     await sleep(2000);
     await sendGroupMessage(ROOM_ID, START_COMMAND);
   });
