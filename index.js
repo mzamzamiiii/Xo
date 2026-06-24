@@ -80,11 +80,15 @@ function parseBoard(message) {
   if (text.includes('(o)') || text.includes('⭕')) { mySign = 'O'; botSign = 'X'; }
   if (text.includes('(x)') || text.includes('❌')) { mySign = 'X'; botSign = 'O'; }
   
-  // تحديث حالة اللوحة بدقة بناءً على الأرقام المختفية والموجودة
+  // تحديث حالة اللوحة بدقة باستخدام RegExp لمنع الخلط مع أرقام الوقت (مثل 10:15)
   for (let i = 0; i < 9; i++) {
     const squareNum = (i + 1).toString();
     
-    if (text.includes(squareNum)) {
+    // فحص الرقم ككلمة مستقلة منفصلة بمسافات أو حدود نصية وليس جزءاً من وقت
+    const regex = new RegExp(`\\b${squareNum}\\b`);
+    const isSquareAvailable = regex.test(text);
+
+    if (isSquareAvailable) {
       // إذا كان رقم المربع موجود في الرسالة، فهو حتماً فارغ ومتاح
       board[i] = null;
     } else {
@@ -95,8 +99,8 @@ function parseBoard(message) {
     }
   }
   
-  // طباعة اللوحة الحالية في الكونسول لمتابعة ذكاء البوت وسير المباراة
-  console.log("اللوحة الحالية:", board.map((v, i) => v || (i + 1)));
+  // طباعة اللوحة الحالية في الكونسول للمتابعة وسير المباراة
+  console.log("اللوحة الحالية المحدثة:", board.map((v, i) => v || (i + 1)));
   
   // التحقق من من عليه الدور
   if (text.includes('your turn') || text.includes('دورك')) {
@@ -147,18 +151,32 @@ function startBot() {
       
       // التعامل مع رسائل الخاص القادمة من بوت اللعبة XO Bot
       if (!message.isGroup && senderId === XO_BOT_ID) {
-        parseBoard(message);
+        const text = (message.body || message.content || '').toLowerCase();
         
+        // جدار حماية ذكي: إذا تم رفض الرقم لأن اللعبة اعتبرته مستخدماً مسبقاً
+        if (text.includes('already been used') || text.includes('مستخدم مسبقاً')) {
+          console.log('⚠️ تم رصد محاولة لعب مربع مستخدم مسبقاً، جاري تصحيح اللوحة فوراً...');
+          for (let i = 1; i <= 9; i++) {
+            if (text.includes(i.toString()) && board[i - 1] !== mySign) {
+              board[i - 1] = botSign; // تسجيل المربع للخصم تلقائياً لتفادي تكراره
+            }
+          }
+          isMyTurn = true; // إعادة تمكين الدور للتعويض واختيار حقل آخر
+        } else {
+          parseBoard(message);
+        }
+        
+        // اتخاذ قرار اللعب وإرسال الحركة
         if (isMyTurn) {
           const moveIndex = getBestMove();
           if (moveIndex !== undefined && moveIndex !== -1) {
             const squareToPlay = (moveIndex + 1).toString();
             
-            // تحديث اللوحة داخلياً بحركتك فوراً قبل الإرسال لمنع التكرار
+            // تحديث اللوحة داخلياً بحركتك فوراً قبل الإرسال لمنع التكرار المتتالي
             board[moveIndex] = mySign;
             isMyTurn = false;
             
-            // تأخير بسيط طبيعي
+            // تأخير بسيط لمحاكاة اللعب الطبيعي واستقرار الاستجابة
             await sleep(600); 
             await sendPrivateMessage(XO_BOT_ID, squareToPlay);
           }
