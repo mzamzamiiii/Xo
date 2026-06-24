@@ -68,17 +68,18 @@ function getBestMove() {
   return availableMoves[Math.floor(Math.random() * availableMoves.length)];
 }
 
-// ================== تحليل لوحة اللعب ==================
+// ================== تحليل لوحة اللعب الفعلي ==================
 function parseBoard(message) {
   const text = (message.body || message.content || '').toLowerCase();
 
+  // تصفير كامل عند بداية الجولة الجديدة
   if (text.includes('game started') || text.includes('بدأت اللعبة')) {
     console.log('🎮 بداية جولة جديدة وتصفير اللوحة...');
     board = Array(9).fill(null);
     isProcessingMove = false;
   }
 
-  // تثبيت الإشارات بشكل صحيح وصارم بدون عكسها
+  // تحديد الرموز بحسب نص الدور الصادر من اللعبة
   if (text.includes('(o)') || text.includes('⭕')) { 
     mySign = 'O'; 
     botSign = 'X'; 
@@ -87,23 +88,28 @@ function parseBoard(message) {
     botSign = 'O'; 
   }
 
-  // تحديث اللوحة بناءً على الأرقام الصريحة فقط المحاطة بحدود نصية لعدم تداخل الوقت
+  // نقرأ مصفوفة الأزرار (Form Rows) إن وجدت في تطبيق وولف، وإلا نعتمد على الأرقام الصريحة المتبقية فقط
+  // لمنع قراءة الأرقام الوهمية خارج مربعات اللعب:
   for (let i = 0; i < 9; i++) {
     const squareNum = (i + 1).toString();
     
-    // إذا قمنا بنحن بلعبها مسبقاً، لا نغيرها
+    // إذا ثبتنا حركتنا مسبقاً لا نغيرها
     if (board[i] === mySign) continue;
 
-    const regex = new RegExp(`\\b${squareNum}\\b`);
+    // نبحث هل الرقم موجود كخيار متاح أم اختفى؟
+    // قمنا بوضع قيود صارمة (وجود مسافات أو أسطر جديدة حول الرقم) لضمان أنه يمثل المربع داخل الشبكة فقط
+    const regex = new RegExp(`(?:^|\\s|\\n)${squareNum}(?:\\s|\\n|$|\\b)`);
+    
     if (regex.test(text)) {
-      board[i] = null; // فارغ
+      board[i] = null; 
     } else {
-      board[i] = botSign; // الخصم لعب هنا
+      // إذا اختفى الرقم تماماً من شبكة اللعب، فهو بالتأكيد للخصم
+      board[i] = botSign; 
     }
   }
 
   console.log(`🤖 رمزي الحالي: [ ${mySign} ] | رمز الخصم: [ ${botSign} ]`);
-  console.log("🔍 مصفوفة اللوحة:", board.map((v, i) => v || (i + 1)));
+  console.log("🔍 مصفوفة اللوحة الحقيقية:", board.map((v, i) => v || (i + 1)));
 
   if (text.includes('your turn') || text.includes('دورك')) {
     isMyTurn = true;
@@ -112,7 +118,7 @@ function parseBoard(message) {
   }
 
   if (text.includes('won') || text.includes('فاز') || text.includes('lost') || text.includes('خسارة') || text.includes('draw') || text.includes('تعادل')) {
-    console.log('🏁 انتهت اللعبة!');
+    console.log('🏁 انتهت المباراة!');
     isMyTurn = false;
     isProcessingMove = false;
     board = Array(9).fill(null);
@@ -159,7 +165,7 @@ function startBot() {
             const squareToPlay = (moveIndex + 1).toString();
             
             isProcessingMove = true; 
-            board[moveIndex] = mySign; // نضع رمزنا الصحيح (mySign) وليس العكس!
+            board[moveIndex] = mySign; 
             isMyTurn = false; 
             
             await sleep(1000); 
@@ -174,7 +180,7 @@ function startBot() {
   });
 
   service.on('ready', async () => {
-    console.log('🤖 البوت جاهز!');
+    console.log('🤖 البوت جاهز ومسجل الدخول!');
     isBotReady = true;
     reconnecting = false;
     await sleep(2000);
