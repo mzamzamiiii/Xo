@@ -4,24 +4,25 @@ import wolfjs from 'wolf.js';
 const { WOLF } = wolfjs;
 
 // ================== الإعدادات ==================
-const ROOM_ID = 81971125;
+const ROOM_ID = 18187126;
 
-// حط هنا ID الحساب/البوت اللي يرسل رسالة الوقت
-const TARGET_USER_ID = 26494626;
+// ID حسابك الثاني / البوت اللي يرسل رسالة:
+// اكتب {الان} بعد مرور 5 ثانية للفوز!
+const TARGET_USER_ID = 75423789;
 
-// الأمر الذي يبدأ اللعبة
+// الأمر يرسل مرة واحدة فقط عند تشغيل البوت
 const START_COMMAND = '!وقت';
 
-// تقديم بسيط قبل الوقت لتعويض تأخير الإرسال والشبكة
-// إذا يرسل متأخر قلل الرقم، وإذا يرسل بدري زوده
-const SEND_LEAD_MS = 0;
+// تعويض تأخير وولف
+// إذا النتيجة تطلع 0.12 ثانية متأخر، حط 120
+// إذا تبيه بدون تعويض، خله 0
+const SEND_LEAD_MS = 120;
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 let service = null;
 let reconnecting = false;
 let isBotReady = false;
-let lastQuestionTime = Date.now();
 let activeTimer = null;
 
 // ================== قراءة نص الرسالة ==================
@@ -53,22 +54,19 @@ function normalizeNumbers(text) {
   });
 }
 
-// ================== استخراج الكلمة والوقت من الرسالة ==================
+// ================== استخراج الكلمة والوقت ==================
 function parseTimingMessage(text) {
   const cleanText = normalizeNumbers(text);
 
-  // استخراج الكلمة بين { }
   const wordMatch = cleanText.match(/\{([^}]+)\}/);
   if (!wordMatch) return null;
 
   const answer = wordMatch[1].trim();
 
-  // استخراج عدد الثواني
   const timeMatch = cleanText.match(/(\d+(?:\.\d+)?)\s*(ثانية|ثواني|ثوان|second|seconds)/i);
   if (!timeMatch) return null;
 
   const seconds = Number(timeMatch[1]);
-
   if (!answer || !seconds || seconds <= 0) return null;
 
   return {
@@ -93,11 +91,11 @@ async function send(roomId, text) {
   }
 }
 
-// ================== جدولة الإرسال بالوقت الصحيح ==================
+// ================== جدولة إرسال الإجابة فقط ==================
 function scheduleAnswer(roomId, answer, delayMs) {
   if (activeTimer) {
-    clearTimeout(activeTimer);
-    activeTimer = null;
+    console.log('⚠️ يوجد مؤقت شغال، تم تجاهل السؤال الجديد');
+    return;
   }
 
   const finalDelay = Math.max(0, delayMs - SEND_LEAD_MS);
@@ -105,14 +103,17 @@ function scheduleAnswer(roomId, answer, delayMs) {
   console.log('--------------------');
   console.log('✅ الكلمة المطلوبة:', answer);
   console.log('⏱️ الوقت المطلوب:', delayMs / 1000, 'ثانية');
+  console.log('⚡ التعويض:', SEND_LEAD_MS, 'ms');
   console.log('🚀 سيتم الإرسال بعد:', finalDelay, 'ms');
 
   activeTimer = setTimeout(async () => {
     await send(roomId, answer);
+
     activeTimer = null;
 
-    await sleep(1000);
-    await send(ROOM_ID, START_COMMAND);
+    // مهم:
+    // لا يتم إرسال !وقت هنا
+    // لأنك طلبت أن !وقت يرسل مرة واحدة فقط عند التشغيل
 
   }, finalDelay);
 }
@@ -156,8 +157,6 @@ function startBot() {
       if (roomId !== ROOM_ID) return;
       if (senderId !== TARGET_USER_ID) return;
 
-      lastQuestionTime = Date.now();
-
       const parsed = parseTimingMessage(text);
       if (!parsed) return;
 
@@ -170,11 +169,13 @@ function startBot() {
 
   service.on('ready', async () => {
     console.log('✅ الحساب جاهز');
+
     isBotReady = true;
     reconnecting = false;
-    lastQuestionTime = Date.now();
 
     await sleep(2000);
+
+    // يرسل !وقت مرة واحدة فقط عند تشغيل البوت
     await send(ROOM_ID, START_COMMAND);
   });
 
@@ -187,18 +188,5 @@ function startBot() {
     restartBot('login failed');
   });
 }
-
-// ================== مراقب التعليق ==================
-setInterval(async () => {
-  if (service && isBotReady && !activeTimer) {
-    const timeSinceLastQuestion = Date.now() - lastQuestionTime;
-
-    if (timeSinceLastQuestion > 20000) {
-      console.log('⚠️ لم تصل رسالة وقت. جاري طلب سؤال جديد...');
-      lastQuestionTime = Date.now();
-      await send(ROOM_ID, START_COMMAND);
-    }
-  }
-}, 5000);
 
 startBot();
