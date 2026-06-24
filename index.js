@@ -147,12 +147,13 @@ function handleIncomingData(message) {
 
   const isMyTurn = text.includes('your turn') || text.includes('turn') || text.includes('xobot-mp-private__content__top__turn');
 
+  // تعديل الشرط بناءً على طلبك (حذف حظر تكرار آخر حركة Played Index)
   if (isMyTurn && !isGameEnding && !isSending) {
     const moveIndex = getBestMove();
-    if (moveIndex !== undefined && moveIndex !== -1 && moveIndex !== lastPlayedIndex) {
+    if (moveIndex !== undefined && moveIndex !== -1) {
       const squareToPlay = (moveIndex + 1).toString();
       
-      isSending = true; // تفعيل القفل لمنع إرسال حركتين معاً
+      isSending = true; 
       board[moveIndex] = mySign;
       lastPlayedIndex = moveIndex; 
 
@@ -177,10 +178,12 @@ async function sendPrivateMessageWithRetry(targetId, text, attempt = 1) {
     await service.messaging.sendPrivateMessage(targetId, text);
     console.log(`✅ تم إرسال الرقم بنجاح: [ ${text} ]`);
 
-    // مهم: فك القفل بعد الإرسال حتى لا يعلق البوت
+    // تعديل طلبك: تصفير مؤشر الحركة السابقة فوراً وتخفيض مهلة فك قفل الحماية إلى 800ms
+    lastPlayedIndex = -1;
+
     setTimeout(() => {
       isSending = false;
-    }, 1200);
+    }, 800);
 
   } catch (err) {
     console.log(`⚠️ فشل إرسال رقم [ ${text} ] محاولة [ ${attempt} ]: ${err.message}`);
@@ -217,7 +220,6 @@ function startBot() {
     }
   });
 
-  // التعديل المحدث لـ messageUpdate بناءً على طلبك لضمان الفك الفوري
   service.on('messageUpdate', async (message) => {
     const senderId = Number(message.sourceSubscriberId);
 
@@ -228,7 +230,7 @@ function startBot() {
   });
 
   service.on('ready', async () => {
-    console.log('🚀 تم تحديث نظام الحماية والمؤقتات الذكية! جاهز للتشغيل المستمر.');
+    console.log('🚀 تم تطبيق التعديلات بنجاح! البوت الآن أكثر مرونة وأسرع بفك الأقفال والتكرار.');
     isBotReady = true;
     reconnecting = false;
     await sleep(2000);
