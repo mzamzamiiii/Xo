@@ -18,9 +18,9 @@ let board = Array(9).fill(null);
 let mySign = 'O';     
 let botSign = 'X';    
 let lastPlayedIndex = -1; 
-let isGameEnding = false; // قفل حماية لمنع تكرار طلب اللعبة الجديدة
+let isGameEnding = false; 
 
-// ================== خوارزمية الذكاء الاصطناعي لـ XO ==================
+// ================== خوارزمية الذكاء الاصطناعي الهجومية الذكية ==================
 const WINNING_COMBOS = [
   [0, 1, 2], [3, 4, 5], [6, 7, 8], 
   [0, 3, 6], [1, 4, 7], [2, 5, 8], 
@@ -35,6 +35,7 @@ function getBestMove() {
   
   if (availableMoves.length === 0) return undefined;
 
+  // 1. اقتناص الفوز الفوري
   for (let combo of WINNING_COMBOS) {
     let myCount = combo.filter(i => board[i] === mySign).length;
     let emptyCount = combo.filter(i => board[i] === null).length;
@@ -44,6 +45,7 @@ function getBestMove() {
     }
   }
 
+  // 2. حظر الخصم ومنعه من الفوز
   for (let combo of WINNING_COMBOS) {
     let botCount = combo.filter(i => board[i] === botSign).length;
     let emptyCount = combo.filter(i => board[i] === null).length;
@@ -53,8 +55,40 @@ function getBestMove() {
     }
   }
 
+  // 3. استراتيجية الهجوم المتقدم (صناعة فخ Fork)
+  for (let move of availableMoves) {
+    board[move] = mySign;
+    let winningLines = 0;
+    for (let combo of WINNING_COMBOS) {
+      let myCount = combo.filter(i => board[i] === mySign).length;
+      let emptyCount = combo.filter(i => board[i] === null).length;
+      if (myCount === 2 && emptyCount === 1) {
+        winningLines++;
+      }
+    }
+    board[move] = null; 
+    if (winningLines >= 2) return move; 
+  }
+
+  // 4. إحباط خطط الـ Fork للخصم
+  for (let move of availableMoves) {
+    board[move] = botSign;
+    let botWinningLines = 0;
+    for (let combo of WINNING_COMBOS) {
+      let botCount = combo.filter(i => board[i] === botSign).length;
+      let emptyCount = combo.filter(i => board[i] === null).length;
+      if (botCount === 2 && emptyCount === 1) {
+        botWinningLines++;
+      }
+    }
+    board[move] = null;
+    if (botWinningLines >= 2) return move; 
+  }
+
+  // 5. السيطرة على مركز اللوحة
   if (board[4] === null && availableMoves.includes(4)) return 4;
 
+  // 6. استراتيجية اللعب في الزوايا لبناء الفخ الهجومي
   const corners = [0, 2, 6, 8];
   const availableCorners = corners.filter(i => board[i] === null);
   if (availableCorners.length > 0) {
@@ -68,7 +102,7 @@ function getBestMove() {
 function handleIncomingData(message) {
   const text = (message.body || message.content || '').toLowerCase();
 
-  // 1. فحص فوري ومباشر لانتهاء المباراة (سواء فوز، خسارة، أو تعادل)
+  // فحص انتهاء المباراة لبدء جولة جديدة بأمان زمني
   if (
     text.includes('lost') || 
     text.includes('won') || 
@@ -79,30 +113,28 @@ function handleIncomingData(message) {
     text.includes('expires in')
   ) {
     if (!isGameEnding) {
-      isGameEnding = true; // تفعيل القفل لمنع التكرار
-      console.log('🏁 رصد انتهاء المباراة (فوز/خسارة/تعادل)! جاري بدء لعبة جديدة بعد 5 ثوانٍ...');
+      isGameEnding = true; 
+      console.log('🏁 جولة منتهية. جاري طلب مباراة جديدة بعد 6 ثوانٍ للأمان ضد الحظر...');
       
-      // إعادة تهيئة المتغيرات للمباراة القادمة
       board = Array(9).fill(null);
       lastPlayedIndex = -1;
 
       setTimeout(async () => {
         await sendGroupMessage(ROOM_ID, START_COMMAND);
-        isGameEnding = false; // فتح القفل للجولة القادمة
-      }, 5000);
+        isGameEnding = false; 
+      }, 6000);
     }
-    return; // التوقف عن تحليل اللوحة لأن المباراة انتهت بالفعل
+    return;
   }
 
-  // تصفير اللوحة عند رصد بداية جولة جديدة صريحة
   if (text.includes('game started') || text.includes('بدأت اللعبة')) {
-    console.log('🎮 بداية جولة جديدة صريحة، تصفير اللوحة...');
+    console.log('🎮 بدأت الجولة، تصفير اللوحة...');
     board = Array(9).fill(null);
     lastPlayedIndex = -1;
     isGameEnding = false;
   }
 
-  // تحديد الرموز والإشارات الحالية من الـ HTML
+  // كشف الرموز
   if (text.includes('(o)') || text.includes('⭕') || text.includes('filter: hue-rotate(210deg)')) { 
     mySign = 'O'; 
     botSign = 'X'; 
@@ -111,7 +143,7 @@ function handleIncomingData(message) {
     botSign = 'O'; 
   }
 
-  // قراءة المربعات المحدثة برمجياً من كود الـ HTML لضمان أعلى دقة
+  // قراءة اللوحة من الـ HTML المحدث
   const positions = text.split('xobot-mp-private__content__middle__position');
   if (positions.length > 1) {
     for (let i = 0; i < 9; i++) {
@@ -125,7 +157,6 @@ function handleIncomingData(message) {
       }
     }
   } else {
-    // فلتر احتياطي مبني على الأرقام الصريحة المتبقية
     for (let i = 0; i < 9; i++) {
       const squareNum = (i + 1).toString();
       const regex = new RegExp(`>${squareNum}<|"${squareNum}"|\\b${squareNum}\\b`);
@@ -140,7 +171,6 @@ function handleIncomingData(message) {
   console.log(`🤖 الرمز الحالي: [ ${mySign} ]`);
   console.log("🔍 اللوحة المحدثة لحظياً:", board.map((v, i) => v || (i + 1)));
 
-  // فحص إذا كان الدور لنا للعب
   const isMyTurn = text.includes('your turn') || text.includes('turn') || text.includes('xobot-mp-private__content__top__turn');
 
   if (isMyTurn && !isGameEnding) {
@@ -149,11 +179,15 @@ function handleIncomingData(message) {
       const squareToPlay = (moveIndex + 1).toString();
       
       board[moveIndex] = mySign;
-      lastPlayedIndex = moveIndex; // حفظ الحركة لمنع إرسال نفس الرقم مرتين متتاليتين
+      lastPlayedIndex = moveIndex; 
+
+      // 🛡️ آلية الأمان: وقت عشوائي ذكي لمنع الحظر ومحاكاة اللعب البشري
+      const secureDelay = Math.floor(Math.random() * (2500 - 1500 + 1)) + 1500;
+      console.log(`⏳ تأخير أمان لحماية الحساب: [ ${secureDelay}ms ] ثم إرسال الحركة...`);
       
       setTimeout(async () => {
         await sendPrivateMessage(XO_BOT_ID, squareToPlay);
-      }, 1000); 
+      }, secureDelay); 
     }
   }
 }
@@ -183,7 +217,6 @@ async function sendPrivateMessage(targetId, text) {
 function startBot() {
   service = new WOLF();
 
-  // 1. التنصت على الرسائل الجديدة (لبداية اللعبة أو رسائل الأخطاء)
   service.on('message', async (message) => {
     try {
       const senderId = Number(message.sourceSubscriberId);
@@ -191,7 +224,7 @@ function startBot() {
         const text = (message.body || message.content || '').toLowerCase();
         
         if (text.includes('already been used') || text.includes('used')) {
-          console.log('⚠️ الخانة مستخدمة، مسح قفل آخر حركة لإعادة المحاولة الحية...');
+          console.log('⚠️ الخانة مستخدمة، مسح القفل لإعادة قراءة اللوحة...');
           lastPlayedIndex = -1;
           return;
         }
@@ -202,7 +235,6 @@ function startBot() {
     }
   });
 
-  // 2. التنصت اللحظي الذكي على تحديث وتعديل نفس الرسالة (Message Update)
   service.on('messageUpdate', async (message) => {
     try {
       const senderId = Number(message.sourceSubscriberId);
@@ -215,7 +247,7 @@ function startBot() {
   });
 
   service.on('ready', async () => {
-    console.log('🤖 البوت جاهز تماماً ومتصل الآن!');
+    console.log('🛡️ تم تشغيل وضع الاكتساح الذكي مع تفعيل جدار الحماية ضد الحظر!');
     isBotReady = true;
     reconnecting = false;
     await sleep(2000);
