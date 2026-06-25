@@ -18,10 +18,11 @@ let board = Array(9).fill(null);
 let mySign = 'X';     
 let botSign = 'O';    
 
-// 🛡️ منظومة الأقفال والمزامنة المستقرة
+// 🛡️ منظومة الأقفال والمزامنة
 let botActionLock = false;       
 let lastOpponentCount = -1;      
 let hasSentRestart = false;      
+let watchdogTimer = null; // 🐕 مؤقت الأمان لمنع التجمد الإستراتيجي
 
 const WINNING_COMBOS = [
   [0, 1, 2], [3, 4, 5], [6, 7, 8], 
@@ -110,17 +111,13 @@ function getBestMove() {
   const opponentMovesCount = board.filter(v => v === botSign).length;
 
   // --- تطبيق دليل الـ WikiHow التكتيكي ---
-  
-  // اللاعب الأول واللوحة فارغة
   if (myMovesCount === 0 && opponentMovesCount === 0) {
     console.log('📐 تكتيك أول: البدء في زاوية (المربع 1)');
     return 0;
   }
 
-  // اللاعب الأول الحركة الثانية
   if (myMovesCount === 1 && opponentMovesCount === 1) {
     const firstCorner = board.indexOf(mySign);
-    
     if (board[4] !== null) {
       console.log('♟️ الخصم احتل المركز، اللعب في الزاوية المقابلة تماماً لتأمين التعادل');
       if (firstCorner === 0) return 8;
@@ -136,11 +133,9 @@ function getBestMove() {
     }
   }
 
-  // اللاعب الثاني
   if (myMovesCount === 0 && opponentMovesCount === 1) {
     const opponentMove = board.indexOf(botSign);
     const corners = [0, 2, 6, 8];
-    
     if (corners.includes(opponentMove)) {
       console.log('🛡️ الخصم بدأ بزاوية، احتلال المركز فوراً (المربع 5)');
       return 4;
@@ -149,21 +144,16 @@ function getBestMove() {
       console.log('⚔️ الخصم بدأ بالمركز، احتلال زاوية استراتيجية (المربع 1)');
       return 0; 
     }
-    if (board[4] === null) {
-      return 4;
-    }
+    if (board[4] === null) return 4;
   }
 
-  // منظومة الـ Minimax للمراحل المتوسطة والمتقدمة
   let bestScore = -Infinity;
   let move = -1;
-
   for (let i = 0; i < availableMoves.length; i++) {
     let idx = availableMoves[i];
     board[idx] = mySign; 
     let score = minimax(board, 0, false); 
     board[idx] = null; 
-
     if (score > bestScore) {
       bestScore = score;
       move = idx;
@@ -203,12 +193,30 @@ function handleIncomingData(message) {
 
       setTimeout(async () => {
         await sendGroupMessageWithRetry(ROOM_ID, START_COMMAND);
+        
+        // 🐕 تشغيل حارس الأمان: إذا مرت 25 ثانية من إرسال الأمر ولم تبدأ اللعبة، نكسر التعليق تلقائياً
+        clearTimeout(watchdogTimer);
+        watchdogTimer = setTimeout(async () => {
+          if (hasSentRestart) {
+            console.log('🐕 [مؤقت الأمان]: مضت 25 ثانية ولم يستجب السيرفر للأمر! إعادة تفعيل المنظومة وإرسال الأمر مجدداً بالقوة...');
+            hasSentRestart = false;
+            botActionLock = false;
+            await sendGroupMessageWithRetry(ROOM_ID, START_COMMAND);
+          }
+        }, 25000);
+
       }, endDelay);
     }
     return;
   }
 
   if (html.includes('Your Turn!') && !isEndGame) {
+    // 🎉 بدأت اللعبة بنجاح وجاء دورنا، نقوم بإلغاء مؤقت الأمان فوراً
+    if (watchdogTimer) {
+      clearTimeout(watchdogTimer);
+      watchdogTimer = null;
+    }
+    
     hasSentRestart = false; 
 
     const blocks = html.split('xobot-mp-private__content__middle__position');
@@ -236,7 +244,6 @@ function handleIncomingData(message) {
   }
 }
 
-// دالة وسيطة لتنفيذ الحركة وحسابها بدقة
 function triggerBotMove() {
   const moveIndex = getBestMove();
   if (moveIndex !== undefined && moveIndex !== -1) {
@@ -273,7 +280,6 @@ async function sendPrivateMessageWithRetry(targetId, text, attempt = 1) {
         sendPrivateMessageWithRetry(targetId, text, attempt + 1);
       }, 2000);
     } else {
-      // 🚨 [إنعاش ذاتي]: السيرفر علّق ورفض الحركة تماماً! نقوم بفك الأقفال وإعادة تشغيل الدور بعد 5 ثوانٍ لإنهاء التجمد
       console.log(`🚨 فك تعليق السيرفر تلقائياً: سيتم إعادة قراءة اللوحة ودفع الحركة مجدداً بعد 5 ثوانٍ...`);
       botActionLock = false;
       setTimeout(() => {
@@ -302,7 +308,6 @@ async function sendGroupMessageWithRetry(roomId, text, attempt = 1) {
         sendGroupMessageWithRetry(roomId, text, attempt + 1);
       }, 2500);
     } else {
-      // 🚨 [إنعاش ذاتي]: السيرفر رفض إرسال أمر البدء/الـ rematch! نقوم بإعادة المحاولة بالكامل بعد 6 ثوانٍ لضمان استمرار دوران الألعاب
       console.log(`🚨 فك تعليق السيرفر في القناة: إعادة إرسال أمر جولة جديدة تلقائياً بعد 6 ثوانٍ...`);
       botActionLock = false;
       hasSentRestart = false;
@@ -336,7 +341,7 @@ function startBot() {
   });
 
   service.on('ready', async () => {
-    console.log('🚀 البوت جاهز ومحصن بالكامل بمنظومة الإنعاش الذاتي لفك تعليق السيرفر اللحظي.');
+    console.log('🚀 البوت جاهز ومحصن بالكامل بمنظومة حارس الأمان (Watchdog) لمنع التجمد.');
     isBotReady = true;
     reconnecting = false;
     await sleep(2000);
