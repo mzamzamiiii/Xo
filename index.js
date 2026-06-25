@@ -28,7 +28,51 @@ const WINNING_COMBOS = [
   [0, 4, 8], [2, 4, 6]             
 ];
 
-// ================== استراتيجية اللعب ==================
+// ================== استراتيجية اللعب (Minimax) ==================
+
+// دالة مساعدة للتحقق من الفوز داخل الخوارزمية
+function checkWinner(tempBoard, player) {
+  for (let combo of WINNING_COMBOS) {
+    if (tempBoard[combo[0]] === player &&
+        tempBoard[combo[1]] === player &&
+        tempBoard[combo[2]] === player) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// خوارزمية Minimax (الاستراتيجية التي لا تقهر)
+function minimax(tempBoard, depth, isMaximizing) {
+  if (checkWinner(tempBoard, mySign)) return 10 - depth;
+  if (checkWinner(tempBoard, botSign)) return depth - 10;
+  if (!tempBoard.includes(null)) return 0;
+
+  if (isMaximizing) {
+    let bestScore = -Infinity;
+    for (let i = 0; i < 9; i++) {
+      if (tempBoard[i] === null) {
+        tempBoard[i] = mySign;
+        let score = minimax(tempBoard, depth + 1, false);
+        tempBoard[i] = null;
+        bestScore = Math.max(score, bestScore);
+      }
+    }
+    return bestScore;
+  } else {
+    let bestScore = Infinity;
+    for (let i = 0; i < 9; i++) {
+      if (tempBoard[i] === null) {
+        tempBoard[i] = botSign;
+        let score = minimax(tempBoard, depth + 1, true);
+        tempBoard[i] = null;
+        bestScore = Math.min(score, bestScore);
+      }
+    }
+    return bestScore;
+  }
+}
+
 function getBestMove() {
   const availableMoves = [];
   for (let i = 0; i < 9; i++) {
@@ -37,64 +81,54 @@ function getBestMove() {
   
   if (availableMoves.length === 0) return undefined;
 
-  for (let combo of WINNING_COMBOS) {
-    let myCount = combo.filter(i => board[i] === mySign).length;
-    let emptyCount = combo.filter(i => board[i] === null).length;
-    if (myCount === 2 && emptyCount === 1) return combo.find(i => board[i] === null);
+  // لتسريع استجابة البوت في الحركات الأولى (تجنب الحسابات العميقة جداً)
+  if (availableMoves.length === 9) return 4; // المنتصف دائماً الأفضل كخطوة أولى
+  if (availableMoves.length === 8) {
+    if (board[4] === null) return 4; // إذا الخصم لم يلعب في المنتصف، خذه
+    return 0; // إذا أخذ المنتصف، العب في الزاوية
   }
 
-  for (let combo of WINNING_COMBOS) {
-    let botCount = combo.filter(i => board[i] === botSign).length;
-    let emptyCount = combo.filter(i => board[i] === null).length;
-    if (botCount === 2 && emptyCount === 1) return combo.find(i => board[i] === null);
-  }
+  let bestScore = -Infinity;
+  let move = -1;
 
-  for (let move of availableMoves) {
-    board[move] = mySign;
-    let winningLines = 0;
-    for (let combo of WINNING_COMBOS) {
-      let myCount = combo.filter(i => board[i] === mySign).length;
-      let emptyCount = combo.filter(i => board[i] === null).length;
-      if (myCount === 2 && emptyCount === 1) winningLines++;
+  for (let i = 0; i < availableMoves.length; i++) {
+    let idx = availableMoves[i];
+    board[idx] = mySign; // تجربة الحركة
+    let score = minimax(board, 0, false); // تقييم الحركة
+    board[idx] = null; // التراجع عن الحركة
+
+    if (score > bestScore) {
+      bestScore = score;
+      move = idx;
     }
-    board[move] = null;
-    if (winningLines >= 2) return move;
   }
 
-  if (board[4] === null && availableMoves.includes(4)) return 4;
-
-  const corners = [0, 2, 6, 8];
-  const availableCorners = corners.filter(i => board[i] === null);
-  if (availableCorners.length > 0) {
-    return availableCorners[Math.floor(Math.random() * availableCorners.length)];
-  }
-
-  return availableMoves[Math.floor(Math.random() * availableMoves.length)];
+  return move;
 }
 
 // ================== المعالجة الاحترافية ==================
 function handleIncomingData(message) {
-  // 1. معالجة الرسائل النصية (مثل خطأ المربع المستخدم)
+  // 1. معالجة الرسائل النصية
   if (message.type === 'text/plain') {
     const plainText = (message.body || '').toLowerCase();
     if (plainText.includes('already been used') || plainText.includes('used')) {
       console.log('⚠️ المربع مستخدم مسبقاً، تحرير اللوحة للمحاولة مرة أخرى...');
-      lastPlayedBoardString = ""; // فك قفل اللوحة للعب مرة أخرى
+      lastPlayedBoardString = ""; 
     }
     return;
   }
 
-  // التأكد من أن الرسالة HTML
   if (message.type !== 'text/html') return;
   const html = message.body;
+  const lowerHtml = html.toLowerCase(); // لضمان التقاط الكلمات بأي حالة أحرف
 
-  // 2. رصد حالة اللعبة من كود الـ HTML
-  if (html.includes('>Tie<') || html.includes('>Won<') || html.includes('>Lost<') || html.includes('game over')) {
+  // 2. رصد حالة اللعبة وإعادة التشغيل التلقائي
+  if (lowerHtml.includes('>tie<') || lowerHtml.includes('>won<') || lowerHtml.includes('>lost<') || lowerHtml.includes('game over') || lowerHtml.includes('winner')) {
     if (!isGameEnding) {
       isGameEnding = true; 
       console.log('🏁 انتهت اللعبة! جاري إرسال طلب جولة جديدة خلال ثوانٍ...');
       board = Array(9).fill(null);
-      lastPlayedBoardString = ""; // تصفير اللوحة
+      lastPlayedBoardString = ""; 
 
       setTimeout(async () => {
         await sendGroupMessage(ROOM_ID, START_COMMAND);
@@ -133,14 +167,13 @@ function handleIncomingData(message) {
   if (html.includes('Your Turn!') && !isGameEnding) {
     const currentBoardString = board.join(',');
 
-    // إذا كانت اللوحة لم تتغير منذ آخر حركة لعبناها، نتجاهل التحديث ولا نرسل شيئاً مرتين
     if (currentBoardString === lastPlayedBoardString) {
       return; 
     }
 
     const moveIndex = getBestMove();
     if (moveIndex !== undefined && moveIndex !== -1) {
-      lastPlayedBoardString = currentBoardString; // قفل اللوحة الحالية
+      lastPlayedBoardString = currentBoardString; 
       const squareToPlay = (moveIndex + 1).toString();
       
       const secureDelay = Math.floor(Math.random() * (1300 - 900 + 1)) + 900; 
@@ -167,7 +200,6 @@ async function sendPrivateMessageWithRetry(targetId, text, attempt = 1) {
         sendPrivateMessageWithRetry(targetId, text, attempt + 1);
       }, 500);
     } else {
-      // في حال الفشل التام، نفك قفل اللوحة ليحاول مجدداً
       lastPlayedBoardString = "";
     }
   }
@@ -197,7 +229,7 @@ function startBot() {
   });
 
   service.on('ready', async () => {
-    console.log('🚀 البوت جاهز الآن! (تم تطبيق القفل الذكي للوحة لحل مشكلة التوقف)');
+    console.log('🚀 البوت جاهز الآن! (تم تفعيل خوارزمية Minimax الذكية وميزة التجديد التلقائي)');
     isBotReady = true;
     reconnecting = false;
     await sleep(2000);
