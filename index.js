@@ -17,10 +17,11 @@ let reconnecting = false;
 let board = Array(9).fill(null); 
 let mySign = 'X';     
 let botSign = 'O';    
-let isGameEnding = false; 
 
-// 🛡️ الحارس الذكي الجديد: تتبع عدد حركات الخصم لمنع التكرار وضمان اللعب الصارم
-let lastOpponentMoveCount = -1; 
+// 🛡️ نظام الأقفال الذكي لمنع التكرار والخطأ 400 بصفة نهائية
+let botActionLock = false;    // يمنع جدولة أكثر من حركة في نفس الدور
+let lastOpponentCount = -1;   // يتتبع حركات الخصم لفتح القفل بدقة
+let hasSentRematch = false;   // يمنع تكرار إرسال طلب مباراة جديدة
 
 const WINNING_COMBOS = [
   [0, 1, 2], [3, 4, 5], [6, 7, 8], 
@@ -29,7 +30,6 @@ const WINNING_COMBOS = [
 ];
 
 // ================== استراتيجية اللعب (Minimax) ==================
-
 function checkWinner(tempBoard, player) {
   for (let combo of WINNING_COMBOS) {
     if (tempBoard[combo[0]] === player &&
@@ -78,7 +78,6 @@ function getBestMove() {
   }
   
   if (availableMoves.length === 0) return undefined;
-
   if (availableMoves.length === 9) return 4; 
   if (availableMoves.length === 8) {
     if (board[4] === null) return 4; 
@@ -99,85 +98,89 @@ function getBestMove() {
       move = idx;
     }
   }
-
   return move;
 }
 
-// ================== المعالجة الاحترافية ==================
+// ================== المعالجة الاحترافية بالأقفال ==================
 function handleIncomingData(message) {
+  // 1. معالجة الرسائل النصية العادية (تحذيرات اللوحة)
   if (message.type === 'text/plain') {
     const plainText = (message.body || '').toLowerCase();
     if (plainText.includes('already been used') || plainText.includes('used')) {
-      console.log('⚠️ المربع مستخدم مسبقاً، إعادة تصفير عداد الحركات للمحاولة مجدداً...');
-      lastOpponentMoveCount = -1; 
+      console.log('⚠️ المربع مستخدم مسبقاً، إعادة فتح الأقفال للمحاولة مجدداً...');
+      botActionLock = false;
+      lastOpponentCount = -1;
     }
     return;
   }
 
+  // 2. فلترة الرسائل لضمان التعامل مع لوحة اللعبة فقط (HTML)
   if (message.type !== 'text/html') return;
   const html = message.body;
   const lowerHtml = html.toLowerCase(); 
 
-  // 1. رصد نهاية اللعبة وإعادة التشغيل بتأخير مناسب
-  if (lowerHtml.includes('rematch') || lowerHtml.includes('you won') || lowerHtml.includes('you lost') || lowerHtml.includes('tie')) {
-    if (!isGameEnding) {
-      isGameEnding = true; 
-      console.log('🏁 انتهت اللعبة! جاري بدء جولة جديدة (rematch) بعد 3 ثوانٍ...');
+  // 3. رصد نهاية اللعبة وإرسال الريماتش (مرة واحدة فقط وبدون تكرار)
+  const isEndGame = lowerHtml.includes('rematch') || lowerHtml.includes('you won') || lowerHtml.includes('you lost') || lowerHtml.includes('tie');
+
+  if (isEndGame) {
+    if (!hasSentRematch) {
+      hasSentRematch = true; 
+      botActionLock = true; // قفل حركات اللعب العادية فوراً
+      console.log('🏁 انتهت اللعبة! جاري إرسال طلب جولة جديدة (rematch) بعد 3 ثوانٍ...');
+      
       board = Array(9).fill(null);
-      lastOpponentMoveCount = -1; 
+      lastOpponentCount = -1; 
 
       setTimeout(async () => {
         await sendPrivateMessageWithRetry(XO_BOT_ID, "rematch");
-        isGameEnding = false; 
       }, 3000);
     }
     return;
   }
 
-  // 2. تحديد الرموز بدقة
-  if (html.includes('(❌)')) {
-    mySign = 'X'; botSign = 'O';
-  } else if (html.includes('(⭕)')) {
-    mySign = 'O'; botSign = 'X';
-  }
+  // 4. معالجة دور اللعب الفعلي
+  if (html.includes('Your Turn!') && !isEndGame) {
+    // جولة جديدة أو دور جديد نشط، نضمن تصفير قفل الريماتش
+    hasSentRematch = false; 
 
-  // 3. استخراج وبناء اللوحة الحالية
-  const blocks = html.split('xobot-mp-private__content__middle__position');
-  if (blocks.length > 9) {
+    // تفكيك اللوحة لاستخراج الحركات الحالية
+    const blocks = html.split('xobot-mp-private__content__middle__position');
+    if (blocks.length <= 9) return; 
+
     for (let i = 0; i < 9; i++) {
       const block = blocks[i + 1];
-      if (block.includes('❌') || block.includes('--x')) {
-        board[i] = 'X';
-      } else if (block.includes('⭕') || block.includes('--o')) {
-        board[i] = 'O';
-      } else {
-        board[i] = null; 
-      }
+      if (block.includes('❌') || block.includes('--x')) board[i] = 'X';
+      else if (block.includes('⭕') || block.includes('--o')) board[i] = 'O';
+      else board[i] = null; 
     }
-  }
 
-  // 4. حساب عدد حركات الخصم الحالية على اللوحة
-  const currentOpponentCount = board.filter(v => v === botSign).length;
+    // تحديد الرموز ديناميكياً
+    if (html.includes('(❌)')) { mySign = 'X'; botSign = 'O'; } 
+    else if (html.includes('(⭕)')) { mySign = 'O'; botSign = 'X'; }
 
-  // 5. اللعب الفعلي عند تحقق دورنا
-  if (html.includes('Your Turn!') && !isGameEnding) {
-    
-    // 🛡️ حارس الأدوار الذكي والمضمون: إذا لم يقم الخصم بحركة جديدة، نتجاهل التحديث (تحديث صدى)
-    if (currentOpponentCount <= lastOpponentMoveCount && currentOpponentCount !== 0 && lastOpponentMoveCount !== -1) {
-      return; 
+    // حساب عدد حركات الخصم الفعلية حالياً على اللوحة
+    const currentOpponentCount = board.filter(v => v === botSign).length;
+
+    // المزامنة الذكية: إذا بدأ جيم جديد تماماً أو إذا لعب الخصم حركة جديدة، نفتح القفل فوراً
+    if (currentOpponentCount > lastOpponentCount || lastOpponentCount === -1) {
+      botActionLock = false;
     }
+
+    // [الحارس الجذري]: إذا كان القفل نشطاً (تمت الجدولة مسبقاً)، نتجاهل التحديث تماماً لمنع كود 400
+    if (botActionLock) return;
 
     const moveIndex = getBestMove();
     if (moveIndex !== undefined && moveIndex !== -1) {
-      // حفظ عدد حركات الخصم الحالية لمنع الإرسال المتكرر لنفس الدور
-      lastOpponentMoveCount = currentOpponentCount; 
-      
+      // تفعيل القفل وحفظ عداد الخصم فوراً قبل الدخول في الـ setTimeout
+      botActionLock = true; 
+      lastOpponentCount = currentOpponentCount; 
+
       const squareToPlay = (moveIndex + 1).toString();
       const secureDelay = Math.floor(Math.random() * (4000 - 2000 + 1)) + 2000; 
       
       console.log(`✨ رمزي: [ ${mySign} ] | رمز الخصم: [ ${botSign} ]`);
       console.log("🔍 اللوحة المستخرجة:", board.map((v, i) => v || (i + 1)));
-      console.log(`⏳ دوري الحقيقي المؤكد! إرسال المربع [ ${squareToPlay} ] بعد تأخير بشري [ ${secureDelay}ms ]`);
+      console.log(`⏳ دوري الحقيقي المؤكد! إرسال المربع [ ${squareToPlay} ] بعد تأخير [ ${secureDelay}ms ]`);
       
       setTimeout(async () => {
         await sendPrivateMessageWithRetry(XO_BOT_ID, squareToPlay);
@@ -186,7 +189,7 @@ function handleIncomingData(message) {
   }
 }
 
-// ================== نظام الإرسال مع التحقق الدقيق ==================
+// ================== نظام الإرسال الآمن والذكي ==================
 async function sendPrivateMessageWithRetry(targetId, text, attempt = 1) {
   if (!service || !isBotReady) return;
 
@@ -198,15 +201,17 @@ async function sendPrivateMessageWithRetry(targetId, text, attempt = 1) {
       throw new Error(`رفض السيرفر الإرسال بكود: ${errCode}`);
     }
 
-    console.log(`✅ تم إرسال الرقم بنجاح ووصل للتطبيق: [ ${text} ]`);
+    console.log(`✅ تم إرسال الرسالة بنجاح وتأكيدها: [ ${text} ]`);
   } catch (err) {
     console.log(`⚠️ فشل تأكيد إرسال [ ${text} ] محاولة [ ${attempt} ]: ${err.message}`);
-    if (attempt < 3 && !isGameEnding) {
+    if (attempt < 3) {
       setTimeout(() => {
         sendPrivateMessageWithRetry(targetId, text, attempt + 1);
       }, 2000);
     } else {
-      lastOpponentMoveCount = -1;
+      // في حال الفشل التام بعد 3 محاولات، نفتح الأقفال لإعطاء فرصة للتحديث القادم
+      botActionLock = false;
+      hasSentRematch = false;
     }
   }
 }
@@ -235,7 +240,7 @@ function startBot() {
   });
 
   service.on('ready', async () => {
-    console.log('🚀 البوت جاهز تماماً ومعزز بنظام حارس الأدوار الديناميكي المضمون 100%!');
+    console.log('🚀 البوت جاهز تماماً ومعزز بنظام الأقفال الجذري المضاد للخطأ 400!');
     isBotReady = true;
     reconnecting = false;
     await sleep(2000);
