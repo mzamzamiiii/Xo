@@ -19,7 +19,8 @@ let mySign = 'X';
 let botSign = 'O';    
 let isGameEnding = false; 
 
-let lastPlayedBoardString = ""; 
+// 🛡️ الحارس الذكي الجديد: تتبع عدد حركات الخصم لمنع التكرار وضمان اللعب الصارم
+let lastOpponentMoveCount = -1; 
 
 const WINNING_COMBOS = [
   [0, 1, 2], [3, 4, 5], [6, 7, 8], 
@@ -107,8 +108,8 @@ function handleIncomingData(message) {
   if (message.type === 'text/plain') {
     const plainText = (message.body || '').toLowerCase();
     if (plainText.includes('already been used') || plainText.includes('used')) {
-      console.log('⚠️ المربع مستخدم مسبقاً، تحرير قفل اللوحة...');
-      lastPlayedBoardString = ""; 
+      console.log('⚠️ المربع مستخدم مسبقاً، إعادة تصفير عداد الحركات للمحاولة مجدداً...');
+      lastOpponentMoveCount = -1; 
     }
     return;
   }
@@ -117,13 +118,13 @@ function handleIncomingData(message) {
   const html = message.body;
   const lowerHtml = html.toLowerCase(); 
 
-  // 1. رصد نهاية اللعبة وإعادة التشغيل بتأخير بشري مناسب
+  // 1. رصد نهاية اللعبة وإعادة التشغيل بتأخير مناسب
   if (lowerHtml.includes('rematch') || lowerHtml.includes('you won') || lowerHtml.includes('you lost') || lowerHtml.includes('tie')) {
     if (!isGameEnding) {
       isGameEnding = true; 
       console.log('🏁 انتهت اللعبة! جاري بدء جولة جديدة (rematch) بعد 3 ثوانٍ...');
       board = Array(9).fill(null);
-      lastPlayedBoardString = ""; 
+      lastOpponentMoveCount = -1; 
 
       setTimeout(async () => {
         await sendPrivateMessageWithRetry(XO_BOT_ID, "rematch");
@@ -155,39 +156,27 @@ function handleIncomingData(message) {
     }
   }
 
-  // 4. 🛡️ حارس الأدوار الذكي (يمنع إرسال حركتين متتاليتين بالخطأ)
-  const xCount = board.filter(v => v === 'X').length;
-  const oCount = board.filter(v => v === 'O').length;
+  // 4. حساب عدد حركات الخصم الحالية على اللوحة
+  const currentOpponentCount = board.filter(v => v === botSign).length;
 
-  if (mySign === 'X') {
-    if (xCount !== oCount) {
-      // الـ X يلعب أولاً، لذا يجب أن يتساوى العددان ليكون دوره الحقيقي
-      return; 
-    }
-  } else {
-    if (xCount !== oCount + 1) {
-      // الـ O يلعب ثانياً، لذا يجب أن يكون الـ X متفوقاً بحبة واحدة ليكون دورنا
-      return; 
-    }
-  }
-
-  console.log(`✨ رمزي: [ ${mySign} ] | رمز الخصم: [ ${botSign} ]`);
-  console.log("🔍 اللوحة المستخرجة:", board.map((v, i) => v || (i + 1)));
-
-  // 5. اللعب الفعلي بعد تخطي كل الحراس المعقدين
+  // 5. اللعب الفعلي عند تحقق دورنا
   if (html.includes('Your Turn!') && !isGameEnding) {
-    const currentBoardString = board.join(',');
-
-    if (currentBoardString === lastPlayedBoardString) {
+    
+    // 🛡️ حارس الأدوار الذكي والمضمون: إذا لم يقم الخصم بحركة جديدة، نتجاهل التحديث (تحديث صدى)
+    if (currentOpponentCount <= lastOpponentMoveCount && currentOpponentCount !== 0 && lastOpponentMoveCount !== -1) {
       return; 
     }
 
     const moveIndex = getBestMove();
     if (moveIndex !== undefined && moveIndex !== -1) {
-      lastPlayedBoardString = currentBoardString; 
-      const squareToPlay = (moveIndex + 1).toString();
+      // حفظ عدد حركات الخصم الحالية لمنع الإرسال المتكرر لنفس الدور
+      lastOpponentMoveCount = currentOpponentCount; 
       
+      const squareToPlay = (moveIndex + 1).toString();
       const secureDelay = Math.floor(Math.random() * (4000 - 2000 + 1)) + 2000; 
+      
+      console.log(`✨ رمزي: [ ${mySign} ] | رمز الخصم: [ ${botSign} ]`);
+      console.log("🔍 اللوحة المستخرجة:", board.map((v, i) => v || (i + 1)));
       console.log(`⏳ دوري الحقيقي المؤكد! إرسال المربع [ ${squareToPlay} ] بعد تأخير بشري [ ${secureDelay}ms ]`);
       
       setTimeout(async () => {
@@ -197,7 +186,7 @@ function handleIncomingData(message) {
   }
 }
 
-// ================== نظام الإرسال المحسن مع التحقق الدقيق ==================
+// ================== نظام الإرسال مع التحقق الدقيق ==================
 async function sendPrivateMessageWithRetry(targetId, text, attempt = 1) {
   if (!service || !isBotReady) return;
 
@@ -217,7 +206,7 @@ async function sendPrivateMessageWithRetry(targetId, text, attempt = 1) {
         sendPrivateMessageWithRetry(targetId, text, attempt + 1);
       }, 2000);
     } else {
-      lastPlayedBoardString = "";
+      lastOpponentMoveCount = -1;
     }
   }
 }
@@ -246,7 +235,7 @@ function startBot() {
   });
 
   service.on('ready', async () => {
-    console.log('🚀 البوت جاهز تماماً ومعزز بحارس الأدوار الحسابي والـ Rematch التلقائي!');
+    console.log('🚀 البوت جاهز تماماً ومعزز بنظام حارس الأدوار الديناميكي المضمون 100%!');
     isBotReady = true;
     reconnecting = false;
     await sleep(2000);
