@@ -19,7 +19,6 @@ let mySign = 'X';
 let botSign = 'O';    
 let isGameEnding = false; 
 
-// 💡 بديل القفل الزمني: حفظ آخر حالة للوحة لتجنب التكرار وللرد بسرعة البرق
 let lastPlayedBoardString = ""; 
 
 const WINNING_COMBOS = [
@@ -105,11 +104,10 @@ function getBestMove() {
 
 // ================== المعالجة الاحترافية ==================
 function handleIncomingData(message) {
-  // 1. معالجة الرسائل النصية
   if (message.type === 'text/plain') {
     const plainText = (message.body || '').toLowerCase();
     if (plainText.includes('already been used') || plainText.includes('used')) {
-      console.log('⚠️ المربع مستخدم مسبقاً، تحرير اللوحة للمحاولة مرة أخرى...');
+      console.log('⚠️ المربع مستخدم مسبقاً، تحرير قفل اللوحة...');
       lastPlayedBoardString = ""; 
     }
     return;
@@ -119,7 +117,7 @@ function handleIncomingData(message) {
   const html = message.body;
   const lowerHtml = html.toLowerCase(); 
 
-  // 2. رصد حالة اللعبة وإعادة التشغيل بتأخير بشري مناسب
+  // 1. رصد نهاية اللعبة وإعادة التشغيل بتأخير بشري مناسب
   if (lowerHtml.includes('rematch') || lowerHtml.includes('you won') || lowerHtml.includes('you lost') || lowerHtml.includes('tie')) {
     if (!isGameEnding) {
       isGameEnding = true; 
@@ -135,14 +133,14 @@ function handleIncomingData(message) {
     return;
   }
 
-  // 3. تحديد رمزي ورمز الخصم بدقة
+  // 2. تحديد الرموز بدقة
   if (html.includes('(❌)')) {
     mySign = 'X'; botSign = 'O';
   } else if (html.includes('(⭕)')) {
     mySign = 'O'; botSign = 'X';
   }
 
-  // 4. استخراج وبناء اللوحة
+  // 3. استخراج وبناء اللوحة الحالية
   const blocks = html.split('xobot-mp-private__content__middle__position');
   if (blocks.length > 9) {
     for (let i = 0; i < 9; i++) {
@@ -157,10 +155,26 @@ function handleIncomingData(message) {
     }
   }
 
+  // 4. 🛡️ حارس الأدوار الذكي (يمنع إرسال حركتين متتاليتين بالخطأ)
+  const xCount = board.filter(v => v === 'X').length;
+  const oCount = board.filter(v => v === 'O').length;
+
+  if (mySign === 'X') {
+    if (xCount !== oCount) {
+      // الـ X يلعب أولاً، لذا يجب أن يتساوى العددان ليكون دوره الحقيقي
+      return; 
+    }
+  } else {
+    if (xCount !== oCount + 1) {
+      // الـ O يلعب ثانياً، لذا يجب أن يكون الـ X متفوقاً بحبة واحدة ليكون دورنا
+      return; 
+    }
+  }
+
   console.log(`✨ رمزي: [ ${mySign} ] | رمز الخصم: [ ${botSign} ]`);
   console.log("🔍 اللوحة المستخرجة:", board.map((v, i) => v || (i + 1)));
 
-  // 5. اللعب بالاعتماد على التحديث الفعلي للوحة
+  // 5. اللعب الفعلي بعد تخطي كل الحراس المعقدين
   if (html.includes('Your Turn!') && !isGameEnding) {
     const currentBoardString = board.join(',');
 
@@ -174,7 +188,7 @@ function handleIncomingData(message) {
       const squareToPlay = (moveIndex + 1).toString();
       
       const secureDelay = Math.floor(Math.random() * (4000 - 2000 + 1)) + 2000; 
-      console.log(`⏳ دوري الآن! إرسال المربع [ ${squareToPlay} ] بعد تأخير بشري [ ${secureDelay}ms ]`);
+      console.log(`⏳ دوري الحقيقي المؤكد! إرسال المربع [ ${squareToPlay} ] بعد تأخير بشري [ ${secureDelay}ms ]`);
       
       setTimeout(async () => {
         await sendPrivateMessageWithRetry(XO_BOT_ID, squareToPlay);
@@ -190,7 +204,6 @@ async function sendPrivateMessageWithRetry(targetId, text, attempt = 1) {
   try {
     const response = await service.messaging.sendPrivateMessage(targetId, text);
     
-    // التحقق الفعلي من كود نجاح السيرفر (200 أو استجابة إيجابية)
     if (!response || (response.code && response.code !== 200) || response.isSuccess === false) {
       const errCode = response ? response.code : 'Unknown';
       throw new Error(`رفض السيرفر الإرسال بكود: ${errCode}`);
@@ -200,12 +213,10 @@ async function sendPrivateMessageWithRetry(targetId, text, attempt = 1) {
   } catch (err) {
     console.log(`⚠️ فشل تأكيد إرسال [ ${text} ] محاولة [ ${attempt} ]: ${err.message}`);
     if (attempt < 3 && !isGameEnding) {
-      // انتظار ثانيتين قبل إعادة المحاولة لمنح السيرفر فرصة للاستجابة
       setTimeout(() => {
         sendPrivateMessageWithRetry(targetId, text, attempt + 1);
       }, 2000);
     } else {
-      // في حال الفشل النهائي يتم تصفير اللوحة للمحاولة لاحقاً وعدم تعليق البوت
       lastPlayedBoardString = "";
     }
   }
@@ -235,7 +246,7 @@ function startBot() {
   });
 
   service.on('ready', async () => {
-    console.log('🚀 البوت جاهز الآن! (تم تفعيل جدار التحقق الذكي من إرسال الرسائل)');
+    console.log('🚀 البوت جاهز تماماً ومعزز بحارس الأدوار الحسابي والـ Rematch التلقائي!');
     isBotReady = true;
     reconnecting = false;
     await sleep(2000);
