@@ -18,7 +18,9 @@ let board = Array(9).fill(null);
 let mySign = 'X';     
 let botSign = 'O';    
 let isGameEnding = false; 
-let isSending = false; 
+
+// 💡 بديل القفل الزمني: حفظ آخر حالة للوحة لتجنب التكرار وللرد بسرعة البرق
+let lastPlayedBoardString = ""; 
 
 const WINNING_COMBOS = [
   [0, 1, 2], [3, 4, 5], [6, 7, 8], 
@@ -70,19 +72,19 @@ function getBestMove() {
   return availableMoves[Math.floor(Math.random() * availableMoves.length)];
 }
 
-// ================== المعالجة الاحترافية لرسائل HTML ==================
+// ================== المعالجة الاحترافية ==================
 function handleIncomingData(message) {
-  // 1. معالجة الرسائل النصية العادية (مثل رسائل الخطأ)
+  // 1. معالجة الرسائل النصية (مثل خطأ المربع المستخدم)
   if (message.type === 'text/plain') {
     const plainText = (message.body || '').toLowerCase();
     if (plainText.includes('already been used') || plainText.includes('used')) {
-      console.log('⚠️ المربع مستخدم مسبقاً، تحرير قفل الإرسال...');
-      isSending = false;
+      console.log('⚠️ المربع مستخدم مسبقاً، تحرير اللوحة للمحاولة مرة أخرى...');
+      lastPlayedBoardString = ""; // فك قفل اللوحة للعب مرة أخرى
     }
     return;
   }
 
-  // التأكد من أن الرسالة هي واجهة اللعبة (HTML)
+  // التأكد من أن الرسالة HTML
   if (message.type !== 'text/html') return;
   const html = message.body;
 
@@ -90,9 +92,9 @@ function handleIncomingData(message) {
   if (html.includes('>Tie<') || html.includes('>Won<') || html.includes('>Lost<') || html.includes('game over')) {
     if (!isGameEnding) {
       isGameEnding = true; 
-      isSending = false;
       console.log('🏁 انتهت اللعبة! جاري إرسال طلب جولة جديدة خلال ثوانٍ...');
       board = Array(9).fill(null);
+      lastPlayedBoardString = ""; // تصفير اللوحة
 
       setTimeout(async () => {
         await sendGroupMessage(ROOM_ID, START_COMMAND);
@@ -109,18 +111,17 @@ function handleIncomingData(message) {
     mySign = 'O'; botSign = 'X';
   }
 
-  // 4. استخراج وبناء اللوحة من مربعات الـ HTML
+  // 4. استخراج وبناء اللوحة
   const blocks = html.split('xobot-mp-private__content__middle__position');
   if (blocks.length > 9) {
     for (let i = 0; i < 9; i++) {
       const block = blocks[i + 1];
-      // فحص محتوى المربع بدقة
       if (block.includes('❌') || block.includes('--x')) {
         board[i] = 'X';
       } else if (block.includes('⭕') || block.includes('--o')) {
         board[i] = 'O';
       } else {
-        board[i] = null; // المربع يحتوي على رقم (فارغ ومتاح للعب)
+        board[i] = null; 
       }
     }
   }
@@ -128,13 +129,20 @@ function handleIncomingData(message) {
   console.log(`✨ رمزي: [ ${mySign} ] | رمز الخصم: [ ${botSign} ]`);
   console.log("🔍 اللوحة المستخرجة:", board.map((v, i) => v || (i + 1)));
 
-  // 5. اللعب فقط إذا كان دوري
-  if (html.includes('Your Turn!') && !isGameEnding && !isSending) {
+  // 5. اللعب بالاعتماد على التحديث الفعلي للوحة
+  if (html.includes('Your Turn!') && !isGameEnding) {
+    const currentBoardString = board.join(',');
+
+    // إذا كانت اللوحة لم تتغير منذ آخر حركة لعبناها، نتجاهل التحديث ولا نرسل شيئاً مرتين
+    if (currentBoardString === lastPlayedBoardString) {
+      return; 
+    }
+
     const moveIndex = getBestMove();
     if (moveIndex !== undefined && moveIndex !== -1) {
+      lastPlayedBoardString = currentBoardString; // قفل اللوحة الحالية
       const squareToPlay = (moveIndex + 1).toString();
       
-      isSending = true; 
       const secureDelay = Math.floor(Math.random() * (1300 - 900 + 1)) + 900; 
       console.log(`⏳ دوري الآن! إرسال المربع [ ${squareToPlay} ] بعد تأخير [ ${secureDelay}ms ]`);
       
@@ -147,19 +155,11 @@ function handleIncomingData(message) {
 
 // ================== نظام الإرسال ==================
 async function sendPrivateMessageWithRetry(targetId, text, attempt = 1) {
-  if (!service || !isBotReady) {
-    isSending = false;
-    return;
-  }
+  if (!service || !isBotReady) return;
 
   try {
     await service.messaging.sendPrivateMessage(targetId, text);
     console.log(`✅ تم إرسال الرقم بنجاح: [ ${text} ]`);
-
-    setTimeout(() => {
-      isSending = false;
-    }, 800);
-
   } catch (err) {
     console.log(`⚠️ فشل إرسال رقم [ ${text} ] محاولة [ ${attempt} ]: ${err.message}`);
     if (attempt < 3 && !isGameEnding) {
@@ -167,7 +167,8 @@ async function sendPrivateMessageWithRetry(targetId, text, attempt = 1) {
         sendPrivateMessageWithRetry(targetId, text, attempt + 1);
       }, 500);
     } else {
-      isSending = false;
+      // في حال الفشل التام، نفك قفل اللوحة ليحاول مجدداً
+      lastPlayedBoardString = "";
     }
   }
 }
@@ -196,7 +197,7 @@ function startBot() {
   });
 
   service.on('ready', async () => {
-    console.log('🚀 البوت الذكي جاهز الآن! تم حل مشكلة القراءة بنجاح.');
+    console.log('🚀 البوت جاهز الآن! (تم تطبيق القفل الذكي للوحة لحل مشكلة التوقف)');
     isBotReady = true;
     reconnecting = false;
     await sleep(2000);
@@ -205,7 +206,7 @@ function startBot() {
 
   const restart = () => {
     if (reconnecting) return;
-    reconnecting = true; isBotReady = false; isSending = false;
+    reconnecting = true; isBotReady = false; 
     setTimeout(startBot, 5000);
   };
 
