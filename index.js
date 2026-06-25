@@ -30,7 +30,6 @@ const WINNING_COMBOS = [
 
 // ================== استراتيجية اللعب (Minimax) ==================
 
-// دالة مساعدة للتحقق من الفوز داخل الخوارزمية
 function checkWinner(tempBoard, player) {
   for (let combo of WINNING_COMBOS) {
     if (tempBoard[combo[0]] === player &&
@@ -42,7 +41,6 @@ function checkWinner(tempBoard, player) {
   return false;
 }
 
-// خوارزمية Minimax (الاستراتيجية التي لا تقهر)
 function minimax(tempBoard, depth, isMaximizing) {
   if (checkWinner(tempBoard, mySign)) return 10 - depth;
   if (checkWinner(tempBoard, botSign)) return depth - 10;
@@ -81,11 +79,10 @@ function getBestMove() {
   
   if (availableMoves.length === 0) return undefined;
 
-  // لتسريع استجابة البوت في الحركات الأولى (تجنب الحسابات العميقة جداً)
-  if (availableMoves.length === 9) return 4; // المنتصف دائماً الأفضل كخطوة أولى
+  if (availableMoves.length === 9) return 4; 
   if (availableMoves.length === 8) {
-    if (board[4] === null) return 4; // إذا الخصم لم يلعب في المنتصف، خذه
-    return 0; // إذا أخذ المنتصف، العب في الزاوية
+    if (board[4] === null) return 4; 
+    return 0; 
   }
 
   let bestScore = -Infinity;
@@ -93,9 +90,9 @@ function getBestMove() {
 
   for (let i = 0; i < availableMoves.length; i++) {
     let idx = availableMoves[i];
-    board[idx] = mySign; // تجربة الحركة
-    let score = minimax(board, 0, false); // تقييم الحركة
-    board[idx] = null; // التراجع عن الحركة
+    board[idx] = mySign; 
+    let score = minimax(board, 0, false); 
+    board[idx] = null; 
 
     if (score > bestScore) {
       bestScore = score;
@@ -120,20 +117,21 @@ function handleIncomingData(message) {
 
   if (message.type !== 'text/html') return;
   const html = message.body;
-  const lowerHtml = html.toLowerCase(); // لضمان التقاط الكلمات بأي حالة أحرف
+  const lowerHtml = html.toLowerCase(); 
 
-  // 2. رصد حالة اللعبة وإعادة التشغيل التلقائي
-  if (lowerHtml.includes('>tie<') || lowerHtml.includes('>won<') || lowerHtml.includes('>lost<') || lowerHtml.includes('game over') || lowerHtml.includes('winner')) {
+  // 2. رصد حالة اللعبة وإعادة التشغيل التلقائي (محدث بناءً على الصور)
+  if (lowerHtml.includes('rematch') || lowerHtml.includes('you won') || lowerHtml.includes('you lost') || lowerHtml.includes('tie')) {
     if (!isGameEnding) {
       isGameEnding = true; 
-      console.log('🏁 انتهت اللعبة! جاري إرسال طلب جولة جديدة خلال ثوانٍ...');
+      console.log('🏁 انتهت اللعبة! جاري بدء جولة جديدة (rematch) فوراً...');
       board = Array(9).fill(null);
       lastPlayedBoardString = ""; 
 
+      // إرسال كلمة rematch في الخاص للبوت بعد ثانية ونصف فقط
       setTimeout(async () => {
-        await sendGroupMessage(ROOM_ID, START_COMMAND);
+        await sendPrivateMessageWithRetry(XO_BOT_ID, "rematch");
         isGameEnding = false; 
-      }, 4000);
+      }, 1500);
     }
     return;
   }
@@ -229,7 +227,7 @@ function startBot() {
   });
 
   service.on('ready', async () => {
-    console.log('🚀 البوت جاهز الآن! (تم تفعيل خوارزمية Minimax الذكية وميزة التجديد التلقائي)');
+    console.log('🚀 البوت جاهز الآن! (تم تفعيل ميزة Rematch السريعة)');
     isBotReady = true;
     reconnecting = false;
     await sleep(2000);
