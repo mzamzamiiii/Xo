@@ -84,57 +84,51 @@ function getBestMove() {
 function handleIncomingData(message) {
   const text = (message.body || message.content || '').toLowerCase();
 
-  // رصد حقيقي ومرن لانتهاء اللعبة لبدء جولة جديدة فوراً ودون تعليق
+  // 1. رصد النهاية وبدء جولة جديدة
   if (
-    text.includes('won') || 
-    text.includes('lost') || 
-    text.includes('tie') || 
-    text.includes('draw') || 
-    text.includes('تعادل') || 
-    text.includes('rematch') || 
-    text.includes('game over') ||
-    text.includes('expires')
+    text.includes('won') || text.includes('lost') || text.includes('tie') || 
+    text.includes('draw') || text.includes('تعادل') || text.includes('game over') || 
+    text.includes('expires') || text.includes('انتهت') || text.includes('فاز')
   ) {
     if (!isGameEnding) {
       isGameEnding = true; 
       isSending = false;
-      console.log('🏁 تم رصد نهاية المباراة حتماً. جاري بدء جولة جديدة تلقائياً خلال 5 ثوانٍ...');
+      console.log('🏁 تم رصد نهاية المباراة. جاري بدء جولة جديدة خلال ثوانٍ...');
       board = Array(9).fill(null);
-      lastPlayedIndex = -1;
 
       setTimeout(async () => {
         await sendGroupMessage(ROOM_ID, START_COMMAND);
         isGameEnding = false; 
-      }, 5000);
+      }, 4000);
     }
     return;
   }
 
   if (text.includes('game started') || text.includes('بدأت اللعبة')) {
-    console.log('🎮 جولة جديدة انطلقت، تصفير مصفوفة اللوحة...');
+    console.log('🎮 جولة جديدة انطلقت!');
     board = Array(9).fill(null);
-    lastPlayedIndex = -1;
     isGameEnding = false;
     isSending = false;
   }
 
-  // التعرف الصارم والديناميكي على الرمز الحالي للبوت (X أو O)
-  if (text.includes('your turn! (❌)') || text.includes('turn! (❌)') || text.includes('your turn! (x)')) {
+  // 2. التعرف على الرمز الحالي
+  if (text.includes('your turn! (❌)') || text.includes('turn! (x)') || text.includes('دورك (❌)')) {
     mySign = 'X';
     botSign = 'O';
-  } else if (text.includes('your turn! (⭕)') || text.includes('turn! (⭕)') || text.includes('your turn! (o)')) {
+  } else if (text.includes('your turn! (⭕)') || text.includes('turn! (o)') || text.includes('دورك (⭕)')) {
     mySign = 'O';
     botSign = 'X';
   }
 
-  // تفكيك وقراءة الأزرار للحصول على اللوحة اللحظية
-  const positions = text.split('xobot-mp-private__content__middle__position');
-  if (positions.length > 1) {
+  // 3. قراءة اللوحة بذكاء عبر الإيموجيات بدلاً من الأكواد المعقدة
+  const boardMatches = text.match(/(❌|⭕|⬜|⬛|🔲|🔳|[1-9])/g);
+  
+  if (boardMatches && boardMatches.length >= 9) {
+    const grid = boardMatches.slice(-9);
     for (let i = 0; i < 9; i++) {
-      const block = positions[i + 1] || '';
-      if (block.includes('--x') || block.includes('❌') || block.includes('position--x')) {
+      if (grid[i] === '❌') {
         board[i] = 'X';
-      } else if (block.includes('--o') || block.includes('⭕') || block.includes('position--o')) {
+      } else if (grid[i] === '⭕') {
         board[i] = 'O';
       } else {
         board[i] = null; 
@@ -142,23 +136,22 @@ function handleIncomingData(message) {
     }
   }
 
-  console.log(`✨ رمزي النشط الآن: [ ${mySign} ] | رمز الخصم: [ ${botSign} ]`);
+  console.log(`✨ رمزي: [ ${mySign} ] | رمز الخصم: [ ${botSign} ]`);
   console.log("🔍 لوحة اللعبة الحالية:", board.map((v, i) => v || (i + 1)));
 
-  const isMyTurn = text.includes('your turn') || text.includes('turn') || text.includes('xobot-mp-private__content__top__turn');
+  // 4. تحديد الدور بشكل صارم جداً
+  const isMyTurn = (text.includes('your turn') || text.includes('دورك'));
+  const isOpponentTurn = (text.includes("opponent's turn") || text.includes('دور الخصم'));
 
-  // تعديل الشرط بناءً على طلبك (حذف حظر تكرار آخر حركة Played Index)
-  if (isMyTurn && !isGameEnding && !isSending) {
+  if (isMyTurn && !isOpponentTurn && !isGameEnding && !isSending) {
     const moveIndex = getBestMove();
     if (moveIndex !== undefined && moveIndex !== -1) {
       const squareToPlay = (moveIndex + 1).toString();
       
       isSending = true; 
-      board[moveIndex] = mySign;
-      lastPlayedIndex = moveIndex; 
-
+      
       const secureDelay = Math.floor(Math.random() * (1300 - 900 + 1)) + 900; 
-      console.log(`⏳ معالجة سريعة وخاطفة، تأخير: [ ${secureDelay}ms ] لإرسال الرقم: [ ${squareToPlay} ]`);
+      console.log(`⏳ دوري الآن! تأخير: [ ${secureDelay}ms ] لإرسال الرقم: [ ${squareToPlay} ]`);
       
       setTimeout(async () => {
         await sendPrivateMessageWithRetry(XO_BOT_ID, squareToPlay);
@@ -178,7 +171,6 @@ async function sendPrivateMessageWithRetry(targetId, text, attempt = 1) {
     await service.messaging.sendPrivateMessage(targetId, text);
     console.log(`✅ تم إرسال الرقم بنجاح: [ ${text} ]`);
 
-    // تعديل طلبك: تصفير مؤشر الحركة السابقة فوراً وتخفيض مهلة فك قفل الحماية إلى 800ms
     lastPlayedIndex = -1;
 
     setTimeout(() => {
