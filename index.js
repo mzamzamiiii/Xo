@@ -18,10 +18,10 @@ let board = Array(9).fill(null);
 let mySign = 'X';     
 let botSign = 'O';    
 
-// 🛡️ نظام الأقفال الذكي لمنع التكرار والخطأ 400 بصفة نهائية
-let botActionLock = false;    // يمنع جدولة أكثر من حركة في نفس الدور
-let lastOpponentCount = -1;   // يتتبع حركات الخصم لفتح القفل بدقة
-let hasSentRematch = false;   // يمنع تكرار إرسال طلب مباراة جديدة
+// 🛡️ نظام الأقفال والمزامنة الذكي
+let botActionLock = false;       // يمنع جدولة أكثر من حركة في نفس الدور
+let lastOpponentCount = -1;      // يتتبع حركات الخصم بدقة
+let hasSentRestart = false;      // يمنع تكرار إرسال أمر البدء عند نهاية الجولة
 
 const WINNING_COMBOS = [
   [0, 1, 2], [3, 4, 5], [6, 7, 8], 
@@ -29,7 +29,7 @@ const WINNING_COMBOS = [
   [0, 4, 8], [2, 4, 6]             
 ];
 
-// ================== استراتيجية اللعب (Minimax) ==================
+// ================== استراتيجية اللعب (Minimax - دون أي تعديل) ==================
 function checkWinner(tempBoard, player) {
   for (let combo of WINNING_COMBOS) {
     if (tempBoard[combo[0]] === player &&
@@ -101,49 +101,52 @@ function getBestMove() {
   return move;
 }
 
-// ================== المعالجة الاحترافية بالأقفال ==================
+// ================== معالجة البيانات والتحكم بالجولات ==================
 function handleIncomingData(message) {
-  // 1. معالجة الرسائل النصية العادية (تحذيرات اللوحة)
+  // 1. معالجة التحذيرات النصية وإعادة فتح الأقفال عند الحاجة
   if (message.type === 'text/plain') {
     const plainText = (message.body || '').toLowerCase();
     if (plainText.includes('already been used') || plainText.includes('used')) {
-      console.log('⚠️ المربع مستخدم مسبقاً، إعادة فتح الأقفال للمحاولة مجدداً...');
+      console.log('⚠️ المربع مستخدم مسبقاً، إعادة فتح الأقفال للمحاولة...');
       botActionLock = false;
       lastOpponentCount = -1;
     }
     return;
   }
 
-  // 2. فلترة الرسائل لضمان التعامل مع لوحة اللعبة فقط (HTML)
+  // 2. التحقق من أن الرسالة القادمة هي لوحة اللعبة (HTML)
   if (message.type !== 'text/html') return;
   const html = message.body;
   const lowerHtml = html.toLowerCase(); 
 
-  // 3. رصد نهاية اللعبة وإرسال الريماتش (مرة واحدة فقط وبدون تكرار)
+  // 3. رصد نهاية اللعبة [تطبيق فكرتك: إرسال الأمر الأساسي في القناة بتأخير أكبر]
   const isEndGame = lowerHtml.includes('rematch') || lowerHtml.includes('you won') || lowerHtml.includes('you lost') || lowerHtml.includes('tie');
 
   if (isEndGame) {
-    if (!hasSentRematch) {
-      hasSentRematch = true; 
-      botActionLock = true; // قفل حركات اللعب العادية فوراً
-      console.log('🏁 انتهت اللعبة! جاري إرسال طلب جولة جديدة (rematch) بعد 3 ثوانٍ...');
+    if (!hasSentRestart) {
+      hasSentRestart = true; 
+      botActionLock = true; // قفل حركات اللعب فوراً لمنع أي تداخل
+      
+      // حساب تأخير بشري عشوائي مريح بين 5 إلى 7 ثوانٍ لضمان إغلاق الجلسة القديمة في السيرفر
+      const endDelay = Math.floor(Math.random() * (7000 - 5000 + 1)) + 5000;
+      console.log(`🏁 انتهت اللعبة! سيتم إرسال الأمر الأساسي [ ${START_COMMAND} ] في القناة بعد تأخير بشري [ ${endDelay}ms ]...`);
       
       board = Array(9).fill(null);
       lastOpponentCount = -1; 
 
       setTimeout(async () => {
-        await sendPrivateMessageWithRetry(XO_BOT_ID, "rematch");
-      }, 3000);
+        await sendGroupMessageWithRetry(ROOM_ID, START_COMMAND);
+      }, endDelay);
     }
     return;
   }
 
-  // 4. معالجة دور اللعب الفعلي
+  // 4. معالجة دور اللعب الفعلي داخل المباراة
   if (html.includes('Your Turn!') && !isEndGame) {
-    // جولة جديدة أو دور جديد نشط، نضمن تصفير قفل الريماتش
-    hasSentRematch = false; 
+    // جولة جديدة بدأت بالفعل، نُصفر قفل إعادة التشغيل
+    hasSentRestart = false; 
 
-    // تفكيك اللوحة لاستخراج الحركات الحالية
+    // تفكيك محتوى اللوحة لاستخراج حركات اللاعبين
     const blocks = html.split('xobot-mp-private__content__middle__position');
     if (blocks.length <= 9) return; 
 
@@ -158,29 +161,27 @@ function handleIncomingData(message) {
     if (html.includes('(❌)')) { mySign = 'X'; botSign = 'O'; } 
     else if (html.includes('(⭕)')) { mySign = 'O'; botSign = 'X'; }
 
-    // حساب عدد حركات الخصم الفعلية حالياً على اللوحة
+    // حساب عدد حركات الخصم الحالية على اللوحة
     const currentOpponentCount = board.filter(v => v === botSign).length;
 
-    // المزامنة الذكية: إذا بدأ جيم جديد تماماً أو إذا لعب الخصم حركة جديدة، نفتح القفل فوراً
+    // فتح القفل عند بداية جيم جديد أو عند قيام الخصم بحركته كاملة
     if (currentOpponentCount > lastOpponentCount || lastOpponentCount === -1) {
       botActionLock = false;
     }
 
-    // [الحارس الجذري]: إذا كان القفل نشطاً (تمت الجدولة مسبقاً)، نتجاهل التحديث تماماً لمنع كود 400
+    // إذا كان القفل نشطاً (تمت جدولة حركة مسبقاً)، نتجاهل التحديث لمنع أخطاء الإرسال المكرر
     if (botActionLock) return;
 
     const moveIndex = getBestMove();
     if (moveIndex !== undefined && moveIndex !== -1) {
-      // تفعيل القفل وحفظ عداد الخصم فوراً قبل الدخول في الـ setTimeout
       botActionLock = true; 
       lastOpponentCount = currentOpponentCount; 
 
       const squareToPlay = (moveIndex + 1).toString();
       const secureDelay = Math.floor(Math.random() * (4000 - 2000 + 1)) + 2000; 
       
-      console.log(`✨ رمزي: [ ${mySign} ] | رمز الخصم: [ ${botSign} ]`);
-      console.log("🔍 اللوحة المستخرجة:", board.map((v, i) => v || (i + 1)));
-      console.log(`⏳ دوري الحقيقي المؤكد! إرسال المربع [ ${squareToPlay} ] بعد تأخير [ ${secureDelay}ms ]`);
+      console.log(`✨ رمزي: [ ${mySign} ] | خصمي: [ ${botSign} ]`);
+      console.log(`⏳ دوري المؤكد، إرسال المربع [ ${squareToPlay} ] بعد [ ${secureDelay}ms ]`);
       
       setTimeout(async () => {
         await sendPrivateMessageWithRetry(XO_BOT_ID, squareToPlay);
@@ -189,39 +190,57 @@ function handleIncomingData(message) {
   }
 }
 
-// ================== نظام الإرسال الآمن والذكي ==================
+// ================== منظومة الإرسال المحصنة والآمنة ==================
+
+// إرسال الحركات في الخاص مع إعادة المحاولة عند الفشل
 async function sendPrivateMessageWithRetry(targetId, text, attempt = 1) {
   if (!service || !isBotReady) return;
 
   try {
     const response = await service.messaging.sendPrivateMessage(targetId, text);
-    
     if (!response || (response.code && response.code !== 200) || response.isSuccess === false) {
       const errCode = response ? response.code : 'Unknown';
-      throw new Error(`رفض السيرفر الإرسال بكود: ${errCode}`);
+      throw new Error(`كود الرفض: ${errCode}`);
     }
-
-    console.log(`✅ تم إرسال الرسالة بنجاح وتأكيدها: [ ${text} ]`);
+    console.log(`✅ تم إرسال الحركة بنجاح وتأكيدها: [ ${text} ]`);
   } catch (err) {
-    console.log(`⚠️ فشل تأكيد إرسال [ ${text} ] محاولة [ ${attempt} ]: ${err.message}`);
+    console.log(`⚠️ فشل تأكيد إرسال الحركة [ ${text} ] محاولة [ ${attempt} ]: ${err.message}`);
     if (attempt < 3) {
       setTimeout(() => {
         sendPrivateMessageWithRetry(targetId, text, attempt + 1);
       }, 2000);
     } else {
-      // في حال الفشل التام بعد 3 محاولات، نفتح الأقفال لإعطاء فرصة للتحديث القادم
       botActionLock = false;
-      hasSentRematch = false;
     }
   }
 }
 
-async function sendGroupMessage(roomId, text) {
+// [جديد] إرسال الأمر الأساسي في القناة مع إعادة المحاولة التلقائية لضمان تخطي كود 400
+async function sendGroupMessageWithRetry(roomId, text, attempt = 1) {
   if (!service || !isBotReady) return;
-  try { await service.messaging.sendGroupMessage(roomId, text); } catch (err) {}
+
+  try {
+    const response = await service.messaging.sendGroupMessage(roomId, text);
+    if (!response || (response.code && response.code !== 200) || response.isSuccess === false) {
+      const errCode = response ? response.code : 'Unknown';
+      throw new Error(`كود الرفض: ${errCode}`);
+    }
+    console.log(`✅ تم إرسال أمر بدء اللعبة في القناة بنجاح: [ ${text} ]`);
+  } catch (err) {
+    console.log(`⚠️ فشل إرسال أمر المجموعة [ ${text} ] محاولة [ ${attempt} ]: ${err.message}`);
+    if (attempt < 3) {
+      setTimeout(() => {
+        sendGroupMessageWithRetry(roomId, text, attempt + 1);
+      }, 2500);
+    } else {
+      // إعادة تصفير الأقفال بالكامل في حال الفشل النهائي لإعطاء فرصة للمحاولات القادمة
+      botActionLock = false;
+      hasSentRestart = false;
+    }
+  }
 }
 
-// ================== التشغيل والتنصت ==================
+// ================== التشغيل والتنصت المستمر ==================
 function startBot() {
   service = new WOLF();
 
@@ -240,11 +259,11 @@ function startBot() {
   });
 
   service.on('ready', async () => {
-    console.log('🚀 البوت جاهز تماماً ومعزز بنظام الأقفال الجذري المضاد للخطأ 400!');
+    console.log('🚀 البوت جاهز ومحصن بالكامل! اعتماد أمر القناة والتأخير البشري الموسع.');
     isBotReady = true;
     reconnecting = false;
     await sleep(2000);
-    await sendGroupMessage(ROOM_ID, START_COMMAND);
+    await sendGroupMessageWithRetry(ROOM_ID, START_COMMAND);
   });
 
   const restart = () => {
