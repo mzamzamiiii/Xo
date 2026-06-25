@@ -3,7 +3,7 @@ import wolfjs from 'wolf.js';
 
 const { WOLF } = wolfjs;
 
-// ================== الإعدادات ==================
+// ================== الإعدادات الأساسية (مستقرة كما هي) ==================
 const ROOM_ID = 22249609;        
 const XO_BOT_ID = 82727814;      
 const START_COMMAND = '!xo private ai 3';     
@@ -18,10 +18,10 @@ let board = Array(9).fill(null);
 let mySign = 'X';     
 let botSign = 'O';    
 
-// 🛡️ نظام الأقفال والمزامنة الذكي
-let botActionLock = false;       // يمنع جدولة أكثر من حركة في نفس الدور
-let lastOpponentCount = -1;      // يتتبع حركات الخصم بدقة
-let hasSentRestart = false;      // يمنع تكرار إرسال أمر البدء عند نهاية الجولة
+// 🛡️ منظومة الأقفال والمزامنة (مستقرة كما هي)
+let botActionLock = false;       
+let lastOpponentCount = -1;      
+let hasSentRestart = false;      
 
 const WINNING_COMBOS = [
   [0, 1, 2], [3, 4, 5], [6, 7, 8], 
@@ -29,7 +29,8 @@ const WINNING_COMBOS = [
   [0, 4, 8], [2, 4, 6]             
 ];
 
-// ================== استراتيجية اللعب (Minimax - دون أي تعديل) ==================
+// ================== معالجة وتحديث استراتيجية اللعب الفائزة ==================
+
 function checkWinner(tempBoard, player) {
   for (let combo of WINNING_COMBOS) {
     if (tempBoard[combo[0]] === player &&
@@ -71,6 +72,7 @@ function minimax(tempBoard, depth, isMaximizing) {
   }
 }
 
+// ⭐ [تحديث التكتيك] تطبيق شروط ودليل الفوز من الصور المرفقة حرفياً
 function getBestMove() {
   const availableMoves = [];
   for (let i = 0; i < 9; i++) {
@@ -78,12 +80,89 @@ function getBestMove() {
   }
   
   if (availableMoves.length === 0) return undefined;
-  if (availableMoves.length === 9) return 4; 
-  if (availableMoves.length === 8) {
-    if (board[4] === null) return 4; 
-    return 0; 
+
+  // 1. الفوز الفوري (قاعدة عامة): إذا كان هناك سطر به حركتان للبوت ومربع فارغ، العب فيه وفُز فوراً
+  for (let combo of WINNING_COMBOS) {
+    let myCount = 0, emptyIdx = -1;
+    for (let idx of combo) {
+      if (board[idx] === mySign) myCount++;
+      else if (board[idx] === null) emptyIdx = idx;
+    }
+    if (myCount === 2 && emptyIdx !== -1) {
+      console.log(`🎯 فرصة فوز مؤكدة، اللعب في المربع [ ${emptyIdx + 1} ]`);
+      return emptyIdx;
+    }
   }
 
+  // 2. الصد الفوري (قاعدة عامة): إذا كان الخصم على وشك الفوز، اغلق عليه الخط فوراً
+  for (let combo of WINNING_COMBOS) {
+    let botCount = 0, emptyIdx = -1;
+    for (let idx of combo) {
+      if (board[idx] === botSign) botCount++;
+      else if (board[idx] === null) emptyIdx = idx;
+    }
+    if (botCount === 2 && emptyIdx !== -1) {
+      console.log(`🛡️ صد هجوم فوز للخصم في المربع [ ${emptyIdx + 1} ]`);
+      return emptyIdx;
+    }
+  }
+
+  // حساب عدد الحركات الملعوبة لتحديد الموقف الافتتاحي بدقة
+  const myMovesCount = board.filter(v => v === mySign).length;
+  const opponentMovesCount = board.filter(v => v === botSign).length;
+
+  // --- تطبيق دليل الـ WikiHow التكتيكي للبدايات الذكية ---
+  
+  // الحالة أ: إذا كنت "اللاعب الأول" واللوحة فارغة تماماً
+  if (myMovesCount === 0 && opponentMovesCount === 0) {
+    console.log('📐 تكتيك أول: البدء في زاوية (المربع 1) لفتح احتمالات الفخاخ المزدوجة');
+    return 0; // حجز أول زاوية (المربع رقم 1 في اللوحة)
+  }
+
+  // الحالة ب: إذا كنت "اللاعب الأول" وفي حركتك الثانية (لعبت زاوية والخصم رد بحركة واحدة)
+  if (myMovesCount === 1 && opponentMovesCount === 1) {
+    const firstCorner = board.indexOf(mySign);
+    
+    // إذا وضع الخصم علامته في المركز (المربع 5) -> ضع العلامة الثانية في الزاوية القطرية المقابلة لتأمين التعادل
+    if (board[4] !== null) {
+      console.log('♟️ الخصم احتل المركز، اللعب في الزاوية المقابلة تماماً لتأمين الجيم وضمان عدم الخسارة');
+      if (firstCorner === 0) return 8;
+      if (firstCorner === 2) return 6;
+      if (firstCorner === 6) return 2;
+      if (firstCorner === 8) return 0;
+    } 
+    // إذا لم يضع الخصم علامته في المركز -> ضع علامتك الثانية في زاوية مجاورة لصنع (فخ مزدوج - Fork) للفوز الحتمي
+    else {
+      console.log('🔥 الخصم لم يلعب في المركز! بناء فخ مزدوج (Fork) للفوز الحتمي كما بالدليل');
+      if (firstCorner === 0) return board[2] === null ? 2 : 6;
+      if (firstCorner === 2) return board[0] === null ? 0 : 8;
+      if (firstCorner === 6) return board[0] === null ? 0 : 8;
+      if (firstCorner === 8) return board[2] === null ? 2 : 6;
+    }
+  }
+
+  // الحالة ج: إذا كنت "اللاعب الثاني" والخصم بدأ اللعب أولاً (لعب حركة واحدة وأنت لم تلعب بعد)
+  if (myMovesCount === 0 && opponentMovesCount === 1) {
+    const opponentMove = board.indexOf(botSign);
+    const corners = [0, 2, 6, 8];
+    
+    // إذا بدأ الخصم بالزاوية -> احتل المركز فوراً (المربع 5) لتعطيل خطته وإفساد مناورته
+    if (corners.includes(opponentMove)) {
+      console.log('🛡️ الخصم بدأ بزاوية، احتلال المركز فوراً (المربع 5) لإفشال مخططه التوسعي');
+      return 4;
+    }
+    // إذا بدأ الخصم في المركز -> أفضل خطوة دفاعية هي احتلال أي زاوية (المربع 1) وانتظار ارتكابه خطأ
+    if (opponentMove === 4) {
+      console.log('⚔️ الخصم بدأ بالمركز، احتلال زاوية استراتيجية (المربع 1) للدفاع الآمن');
+      return 0; 
+    }
+    // إذا بدأ الخصم في الأطراف (الخطوط العادية) -> المركز هو الأفضل دائماً
+    if (board[4] === null) {
+      return 4;
+    }
+  }
+
+  // 4. الذكاء الاصطناعي (Minimax): يعمل كمنظومة إسناد وحسابات متقدمة لباقي أدوار المباراة المتوسطة لضمان التقفيل المثالي
   let bestScore = -Infinity;
   let move = -1;
 
@@ -101,9 +180,8 @@ function getBestMove() {
   return move;
 }
 
-// ================== معالجة البيانات والتحكم بالجولات ==================
+// ================== معالجة البيانات والتحكم بالجولات (مستقرة كما هي) ==================
 function handleIncomingData(message) {
-  // 1. معالجة التحذيرات النصية وإعادة فتح الأقفال عند الحاجة
   if (message.type === 'text/plain') {
     const plainText = (message.body || '').toLowerCase();
     if (plainText.includes('already been used') || plainText.includes('used')) {
@@ -114,20 +192,17 @@ function handleIncomingData(message) {
     return;
   }
 
-  // 2. التحقق من أن الرسالة القادمة هي لوحة اللعبة (HTML)
   if (message.type !== 'text/html') return;
   const html = message.body;
   const lowerHtml = html.toLowerCase(); 
 
-  // 3. رصد نهاية اللعبة [تطبيق فكرتك: إرسال الأمر الأساسي في القناة بتأخير أكبر]
   const isEndGame = lowerHtml.includes('rematch') || lowerHtml.includes('you won') || lowerHtml.includes('you lost') || lowerHtml.includes('tie');
 
   if (isEndGame) {
     if (!hasSentRestart) {
       hasSentRestart = true; 
-      botActionLock = true; // قفل حركات اللعب فوراً لمنع أي تداخل
+      botActionLock = true; 
       
-      // حساب تأخير بشري عشوائي مريح بين 5 إلى 7 ثوانٍ لضمان إغلاق الجلسة القديمة في السيرفر
       const endDelay = Math.floor(Math.random() * (7000 - 5000 + 1)) + 5000;
       console.log(`🏁 انتهت اللعبة! سيتم إرسال الأمر الأساسي [ ${START_COMMAND} ] في القناة بعد تأخير بشري [ ${endDelay}ms ]...`);
       
@@ -141,12 +216,9 @@ function handleIncomingData(message) {
     return;
   }
 
-  // 4. معالجة دور اللعب الفعلي داخل المباراة
   if (html.includes('Your Turn!') && !isEndGame) {
-    // جولة جديدة بدأت بالفعل، نُصفر قفل إعادة التشغيل
     hasSentRestart = false; 
 
-    // تفكيك محتوى اللوحة لاستخراج حركات اللاعبين
     const blocks = html.split('xobot-mp-private__content__middle__position');
     if (blocks.length <= 9) return; 
 
@@ -157,19 +229,15 @@ function handleIncomingData(message) {
       else board[i] = null; 
     }
 
-    // تحديد الرموز ديناميكياً
     if (html.includes('(❌)')) { mySign = 'X'; botSign = 'O'; } 
     else if (html.includes('(⭕)')) { mySign = 'O'; botSign = 'X'; }
 
-    // حساب عدد حركات الخصم الحالية على اللوحة
     const currentOpponentCount = board.filter(v => v === botSign).length;
 
-    // فتح القفل عند بداية جيم جديد أو عند قيام الخصم بحركته كاملة
     if (currentOpponentCount > lastOpponentCount || lastOpponentCount === -1) {
       botActionLock = false;
     }
 
-    // إذا كان القفل نشطاً (تمت جدولة حركة مسبقاً)، نتجاهل التحديث لمنع أخطاء الإرسال المكرر
     if (botActionLock) return;
 
     const moveIndex = getBestMove();
@@ -190,9 +258,8 @@ function handleIncomingData(message) {
   }
 }
 
-// ================== منظومة الإرسال المحصنة والآمنة ==================
+// ================== منظومة الإرسال المحصنة (مستقرة كما هي) ==================
 
-// إرسال الحركات في الخاص مع إعادة المحاولة عند الفشل
 async function sendPrivateMessageWithRetry(targetId, text, attempt = 1) {
   if (!service || !isBotReady) return;
 
@@ -215,7 +282,6 @@ async function sendPrivateMessageWithRetry(targetId, text, attempt = 1) {
   }
 }
 
-// [جديد] إرسال الأمر الأساسي في القناة مع إعادة المحاولة التلقائية لضمان تخطي كود 400
 async function sendGroupMessageWithRetry(roomId, text, attempt = 1) {
   if (!service || !isBotReady) return;
 
@@ -233,7 +299,6 @@ async function sendGroupMessageWithRetry(roomId, text, attempt = 1) {
         sendGroupMessageWithRetry(roomId, text, attempt + 1);
       }, 2500);
     } else {
-      // إعادة تصفير الأقفال بالكامل في حال الفشل النهائي لإعطاء فرصة للمحاولات القادمة
       botActionLock = false;
       hasSentRestart = false;
     }
@@ -259,7 +324,7 @@ function startBot() {
   });
 
   service.on('ready', async () => {
-    console.log('🚀 البوت جاهز ومحصن بالكامل! اعتماد أمر القناة والتأخير البشري الموسع.');
+    console.log('🚀 البوت جاهز ومحصن بالكامل بالاستراتيجية المحدثة والتأخير المستقر.');
     isBotReady = true;
     reconnecting = false;
     await sleep(2000);
