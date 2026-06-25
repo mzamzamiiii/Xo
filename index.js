@@ -119,19 +119,19 @@ function handleIncomingData(message) {
   const html = message.body;
   const lowerHtml = html.toLowerCase(); 
 
-  // 2. رصد حالة اللعبة وإعادة التشغيل التلقائي (محدث بناءً على الصور)
+  // 2. رصد حالة اللعبة وإعادة التشغيل بتأخير بشري مناسب
   if (lowerHtml.includes('rematch') || lowerHtml.includes('you won') || lowerHtml.includes('you lost') || lowerHtml.includes('tie')) {
     if (!isGameEnding) {
       isGameEnding = true; 
-      console.log('🏁 انتهت اللعبة! جاري بدء جولة جديدة (rematch) فوراً...');
+      console.log('🏁 انتهت اللعبة! جاري بدء جولة جديدة (rematch) بعد 3 ثوانٍ...');
       board = Array(9).fill(null);
       lastPlayedBoardString = ""; 
 
-      // إرسال كلمة rematch في الخاص للبوت بعد ثانية ونصف فقط
+      // التأخير هنا 3000 ملي ثانية (3 ثوانٍ) كخطأ بشري مقصود
       setTimeout(async () => {
         await sendPrivateMessageWithRetry(XO_BOT_ID, "rematch");
         isGameEnding = false; 
-      }, 1500);
+      }, 3000);
     }
     return;
   }
@@ -174,8 +174,9 @@ function handleIncomingData(message) {
       lastPlayedBoardString = currentBoardString; 
       const squareToPlay = (moveIndex + 1).toString();
       
-      const secureDelay = Math.floor(Math.random() * (1300 - 900 + 1)) + 900; 
-      console.log(`⏳ دوري الآن! إرسال المربع [ ${squareToPlay} ] بعد تأخير [ ${secureDelay}ms ]`);
+      // 💡 خطأ بشري: اختيار رقم عشوائي بين 2000 و 4000 ملي ثانية (من ثانيتين إلى 4 ثوانٍ)
+      const secureDelay = Math.floor(Math.random() * (4000 - 2000 + 1)) + 2000; 
+      console.log(`⏳ دوري الآن! إرسال المربع [ ${squareToPlay} ] بعد تأخير بشري [ ${secureDelay}ms ]`);
       
       setTimeout(async () => {
         await sendPrivateMessageWithRetry(XO_BOT_ID, squareToPlay);
@@ -196,7 +197,7 @@ async function sendPrivateMessageWithRetry(targetId, text, attempt = 1) {
     if (attempt < 3 && !isGameEnding) {
       setTimeout(() => {
         sendPrivateMessageWithRetry(targetId, text, attempt + 1);
-      }, 500);
+      }, 1000); // زيادة التأخير في حالة الفشل وإعادة المحاولة
     } else {
       lastPlayedBoardString = "";
     }
@@ -227,7 +228,7 @@ function startBot() {
   });
 
   service.on('ready', async () => {
-    console.log('🚀 البوت جاهز الآن! (تم تفعيل ميزة Rematch السريعة)');
+    console.log('🚀 البوت جاهز الآن! (تم تطبيق التأخير البشري)');
     isBotReady = true;
     reconnecting = false;
     await sleep(2000);
