@@ -127,7 +127,6 @@ function handleIncomingData(message) {
       board = Array(9).fill(null);
       lastPlayedBoardString = ""; 
 
-      // التأخير هنا 3000 ملي ثانية (3 ثوانٍ) كخطأ بشري مقصود
       setTimeout(async () => {
         await sendPrivateMessageWithRetry(XO_BOT_ID, "rematch");
         isGameEnding = false; 
@@ -174,7 +173,6 @@ function handleIncomingData(message) {
       lastPlayedBoardString = currentBoardString; 
       const squareToPlay = (moveIndex + 1).toString();
       
-      // 💡 خطأ بشري: اختيار رقم عشوائي بين 2000 و 4000 ملي ثانية (من ثانيتين إلى 4 ثوانٍ)
       const secureDelay = Math.floor(Math.random() * (4000 - 2000 + 1)) + 2000; 
       console.log(`⏳ دوري الآن! إرسال المربع [ ${squareToPlay} ] بعد تأخير بشري [ ${secureDelay}ms ]`);
       
@@ -185,20 +183,29 @@ function handleIncomingData(message) {
   }
 }
 
-// ================== نظام الإرسال ==================
+// ================== نظام الإرسال المحسن مع التحقق الدقيق ==================
 async function sendPrivateMessageWithRetry(targetId, text, attempt = 1) {
   if (!service || !isBotReady) return;
 
   try {
-    await service.messaging.sendPrivateMessage(targetId, text);
-    console.log(`✅ تم إرسال الرقم بنجاح: [ ${text} ]`);
+    const response = await service.messaging.sendPrivateMessage(targetId, text);
+    
+    // التحقق الفعلي من كود نجاح السيرفر (200 أو استجابة إيجابية)
+    if (!response || (response.code && response.code !== 200) || response.isSuccess === false) {
+      const errCode = response ? response.code : 'Unknown';
+      throw new Error(`رفض السيرفر الإرسال بكود: ${errCode}`);
+    }
+
+    console.log(`✅ تم إرسال الرقم بنجاح ووصل للتطبيق: [ ${text} ]`);
   } catch (err) {
-    console.log(`⚠️ فشل إرسال رقم [ ${text} ] محاولة [ ${attempt} ]: ${err.message}`);
+    console.log(`⚠️ فشل تأكيد إرسال [ ${text} ] محاولة [ ${attempt} ]: ${err.message}`);
     if (attempt < 3 && !isGameEnding) {
+      // انتظار ثانيتين قبل إعادة المحاولة لمنح السيرفر فرصة للاستجابة
       setTimeout(() => {
         sendPrivateMessageWithRetry(targetId, text, attempt + 1);
-      }, 1000); // زيادة التأخير في حالة الفشل وإعادة المحاولة
+      }, 2000);
     } else {
+      // في حال الفشل النهائي يتم تصفير اللوحة للمحاولة لاحقاً وعدم تعليق البوت
       lastPlayedBoardString = "";
     }
   }
@@ -228,7 +235,7 @@ function startBot() {
   });
 
   service.on('ready', async () => {
-    console.log('🚀 البوت جاهز الآن! (تم تطبيق التأخير البشري)');
+    console.log('🚀 البوت جاهز الآن! (تم تفعيل جدار التحقق الذكي من إرسال الرسائل)');
     isBotReady = true;
     reconnecting = false;
     await sleep(2000);
