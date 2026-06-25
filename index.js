@@ -3,7 +3,7 @@ import wolfjs from 'wolf.js';
 
 const { WOLF } = wolfjs;
 
-// ================== الإعدادات الأساسية (مستقرة كما هي) ==================
+// ================== الإعدادات الأساسية ==================
 const ROOM_ID = 22249609;        
 const XO_BOT_ID = 82727814;      
 const START_COMMAND = '!xo private ai 3';     
@@ -18,7 +18,7 @@ let board = Array(9).fill(null);
 let mySign = 'X';     
 let botSign = 'O';    
 
-// 🛡️ منظومة الأقفال والمزامنة (مستقرة كما هي)
+// 🛡️ منظومة الأقفال والمزامنة المستقرة
 let botActionLock = false;       
 let lastOpponentCount = -1;      
 let hasSentRestart = false;      
@@ -72,7 +72,6 @@ function minimax(tempBoard, depth, isMaximizing) {
   }
 }
 
-// ⭐ [تحديث التكتيك] تطبيق شروط ودليل الفوز من الصور المرفقة حرفياً
 function getBestMove() {
   const availableMoves = [];
   for (let i = 0; i < 9; i++) {
@@ -81,7 +80,7 @@ function getBestMove() {
   
   if (availableMoves.length === 0) return undefined;
 
-  // 1. الفوز الفوري (قاعدة عامة): إذا كان هناك سطر به حركتان للبوت ومربع فارغ، العب فيه وفُز فوراً
+  // 1. الفوز الفوري
   for (let combo of WINNING_COMBOS) {
     let myCount = 0, emptyIdx = -1;
     for (let idx of combo) {
@@ -94,7 +93,7 @@ function getBestMove() {
     }
   }
 
-  // 2. الصد الفوري (قاعدة عامة): إذا كان الخصم على وشك الفوز، اغلق عليه الخط فوراً
+  // 2. الصد الفوري
   for (let combo of WINNING_COMBOS) {
     let botCount = 0, emptyIdx = -1;
     for (let idx of combo) {
@@ -107,33 +106,29 @@ function getBestMove() {
     }
   }
 
-  // حساب عدد الحركات الملعوبة لتحديد الموقف الافتتاحي بدقة
   const myMovesCount = board.filter(v => v === mySign).length;
   const opponentMovesCount = board.filter(v => v === botSign).length;
 
-  // --- تطبيق دليل الـ WikiHow التكتيكي للبدايات الذكية ---
+  // --- تطبيق دليل الـ WikiHow التكتيكي ---
   
-  // الحالة أ: إذا كنت "اللاعب الأول" واللوحة فارغة تماماً
+  // اللاعب الأول واللوحة فارغة
   if (myMovesCount === 0 && opponentMovesCount === 0) {
-    console.log('📐 تكتيك أول: البدء في زاوية (المربع 1) لفتح احتمالات الفخاخ المزدوجة');
-    return 0; // حجز أول زاوية (المربع رقم 1 في اللوحة)
+    console.log('📐 تكتيك أول: البدء في زاوية (المربع 1)');
+    return 0;
   }
 
-  // الحالة ب: إذا كنت "اللاعب الأول" وفي حركتك الثانية (لعبت زاوية والخصم رد بحركة واحدة)
+  // اللاعب الأول الحركة الثانية
   if (myMovesCount === 1 && opponentMovesCount === 1) {
     const firstCorner = board.indexOf(mySign);
     
-    // إذا وضع الخصم علامته في المركز (المربع 5) -> ضع العلامة الثانية في الزاوية القطرية المقابلة لتأمين التعادل
     if (board[4] !== null) {
-      console.log('♟️ الخصم احتل المركز، اللعب في الزاوية المقابلة تماماً لتأمين الجيم وضمان عدم الخسارة');
+      console.log('♟️ الخصم احتل المركز، اللعب في الزاوية المقابلة تماماً لتأمين التعادل');
       if (firstCorner === 0) return 8;
       if (firstCorner === 2) return 6;
       if (firstCorner === 6) return 2;
       if (firstCorner === 8) return 0;
-    } 
-    // إذا لم يضع الخصم علامته في المركز -> ضع علامتك الثانية في زاوية مجاورة لصنع (فخ مزدوج - Fork) للفوز الحتمي
-    else {
-      console.log('🔥 الخصم لم يلعب في المركز! بناء فخ مزدوج (Fork) للفوز الحتمي كما بالدليل');
+    } else {
+      console.log('🔥 الخصم لم يلعب في المركز! بناء فخ مزدوج (Fork) للفوز الحتمي');
       if (firstCorner === 0) return board[2] === null ? 2 : 6;
       if (firstCorner === 2) return board[0] === null ? 0 : 8;
       if (firstCorner === 6) return board[0] === null ? 0 : 8;
@@ -141,28 +136,25 @@ function getBestMove() {
     }
   }
 
-  // الحالة ج: إذا كنت "اللاعب الثاني" والخصم بدأ اللعب أولاً (لعب حركة واحدة وأنت لم تلعب بعد)
+  // اللاعب الثاني
   if (myMovesCount === 0 && opponentMovesCount === 1) {
     const opponentMove = board.indexOf(botSign);
     const corners = [0, 2, 6, 8];
     
-    // إذا بدأ الخصم بالزاوية -> احتل المركز فوراً (المربع 5) لتعطيل خطته وإفساد مناورته
     if (corners.includes(opponentMove)) {
-      console.log('🛡️ الخصم بدأ بزاوية، احتلال المركز فوراً (المربع 5) لإفشال مخططه التوسعي');
+      console.log('🛡️ الخصم بدأ بزاوية، احتلال المركز فوراً (المربع 5)');
       return 4;
     }
-    // إذا بدأ الخصم في المركز -> أفضل خطوة دفاعية هي احتلال أي زاوية (المربع 1) وانتظار ارتكابه خطأ
     if (opponentMove === 4) {
-      console.log('⚔️ الخصم بدأ بالمركز، احتلال زاوية استراتيجية (المربع 1) للدفاع الآمن');
+      console.log('⚔️ الخصم بدأ بالمركز، احتلال زاوية استراتيجية (المربع 1)');
       return 0; 
     }
-    // إذا بدأ الخصم في الأطراف (الخطوط العادية) -> المركز هو الأفضل دائماً
     if (board[4] === null) {
       return 4;
     }
   }
 
-  // 4. الذكاء الاصطناعي (Minimax): يعمل كمنظومة إسناد وحسابات متقدمة لباقي أدوار المباراة المتوسطة لضمان التقفيل المثالي
+  // منظومة الـ Minimax للمراحل المتوسطة والمتقدمة
   let bestScore = -Infinity;
   let move = -1;
 
@@ -180,7 +172,7 @@ function getBestMove() {
   return move;
 }
 
-// ================== معالجة البيانات والتحكم بالجولات (مستقرة كما هي) ==================
+// ================== معالجة البيانات والتحكم بالجولات ==================
 function handleIncomingData(message) {
   if (message.type === 'text/plain') {
     const plainText = (message.body || '').toLowerCase();
@@ -204,7 +196,7 @@ function handleIncomingData(message) {
       botActionLock = true; 
       
       const endDelay = Math.floor(Math.random() * (7000 - 5000 + 1)) + 5000;
-      console.log(`🏁 انتهت اللعبة! سيتم إرسال الأمر الأساسي [ ${START_COMMAND} ] في القناة بعد تأخير بشري [ ${endDelay}ms ]...`);
+      console.log(`🏁 انتهت اللعبة! سيتم إرسال الأمر الأساسي [ ${START_COMMAND} ] بعد تأخير [ ${endDelay}ms ]...`);
       
       board = Array(9).fill(null);
       lastOpponentCount = -1; 
@@ -240,25 +232,29 @@ function handleIncomingData(message) {
 
     if (botActionLock) return;
 
-    const moveIndex = getBestMove();
-    if (moveIndex !== undefined && moveIndex !== -1) {
-      botActionLock = true; 
-      lastOpponentCount = currentOpponentCount; 
-
-      const squareToPlay = (moveIndex + 1).toString();
-      const secureDelay = Math.floor(Math.random() * (4000 - 2000 + 1)) + 2000; 
-      
-      console.log(`✨ رمزي: [ ${mySign} ] | خصمي: [ ${botSign} ]`);
-      console.log(`⏳ دوري المؤكد، إرسال المربع [ ${squareToPlay} ] بعد [ ${secureDelay}ms ]`);
-      
-      setTimeout(async () => {
-        await sendPrivateMessageWithRetry(XO_BOT_ID, squareToPlay);
-      }, secureDelay); 
-    }
+    triggerBotMove();
   }
 }
 
-// ================== منظومة الإرسال المحصنة (مستقرة كما هي) ==================
+// دالة وسيطة لتنفيذ الحركة وحسابها بدقة
+function triggerBotMove() {
+  const moveIndex = getBestMove();
+  if (moveIndex !== undefined && moveIndex !== -1) {
+    botActionLock = true; 
+
+    const squareToPlay = (moveIndex + 1).toString();
+    const secureDelay = Math.floor(Math.random() * (4000 - 2000 + 1)) + 2000; 
+    
+    console.log(`✨ رمزي: [ ${mySign} ] | خصمي: [ ${botSign} ]`);
+    console.log(`⏳ دوري المؤكد، إرسال المربع [ ${squareToPlay} ] بعد [ ${secureDelay}ms ]`);
+    
+    setTimeout(async () => {
+      await sendPrivateMessageWithRetry(XO_BOT_ID, squareToPlay);
+    }, secureDelay); 
+  }
+}
+
+// ================== منظومة الإرسال الذكية المحصنة بالإنعاش التلقائي ==================
 
 async function sendPrivateMessageWithRetry(targetId, text, attempt = 1) {
   if (!service || !isBotReady) return;
@@ -277,7 +273,14 @@ async function sendPrivateMessageWithRetry(targetId, text, attempt = 1) {
         sendPrivateMessageWithRetry(targetId, text, attempt + 1);
       }, 2000);
     } else {
+      // 🚨 [إنعاش ذاتي]: السيرفر علّق ورفض الحركة تماماً! نقوم بفك الأقفال وإعادة تشغيل الدور بعد 5 ثوانٍ لإنهاء التجمد
+      console.log(`🚨 فك تعليق السيرفر تلقائياً: سيتم إعادة قراءة اللوحة ودفع الحركة مجدداً بعد 5 ثوانٍ...`);
       botActionLock = false;
+      setTimeout(() => {
+        if (!botActionLock) {
+          triggerBotMove();
+        }
+      }, 5000);
     }
   }
 }
@@ -299,8 +302,17 @@ async function sendGroupMessageWithRetry(roomId, text, attempt = 1) {
         sendGroupMessageWithRetry(roomId, text, attempt + 1);
       }, 2500);
     } else {
+      // 🚨 [إنعاش ذاتي]: السيرفر رفض إرسال أمر البدء/الـ rematch! نقوم بإعادة المحاولة بالكامل بعد 6 ثوانٍ لضمان استمرار دوران الألعاب
+      console.log(`🚨 فك تعليق السيرفر في القناة: إعادة إرسال أمر جولة جديدة تلقائياً بعد 6 ثوانٍ...`);
       botActionLock = false;
       hasSentRestart = false;
+      setTimeout(() => {
+        if (!hasSentRestart) {
+          hasSentRestart = true;
+          botActionLock = true;
+          sendGroupMessageWithRetry(roomId, text);
+        }
+      }, 6000);
     }
   }
 }
@@ -324,7 +336,7 @@ function startBot() {
   });
 
   service.on('ready', async () => {
-    console.log('🚀 البوت جاهز ومحصن بالكامل بالاستراتيجية المحدثة والتأخير المستقر.');
+    console.log('🚀 البوت جاهز ومحصن بالكامل بمنظومة الإنعاش الذاتي لفك تعليق السيرفر اللحظي.');
     isBotReady = true;
     reconnecting = false;
     await sleep(2000);
