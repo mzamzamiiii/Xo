@@ -2,9 +2,8 @@ import 'dotenv/config';
 import wolfjs from 'wolf.js';
 
 const { WOLF } = wolfjs;
+const { WOLF: _WOLF } = wolfjs;
 
-// ================== لوحة التحكم (Config) ==================
-// ملاحظة: لكي يعمل الحساب، اجعل enabled: true
 const MY_ACCOUNTS = [
   { id: 1, email: process.env.U_MAIL_1, pass: process.env.U_PASS_1, roomId: 22249609, enabled: false },
   { id: 2, email: process.env.U_MAIL_2, pass: process.env.U_PASS_2, roomId: 22249609, enabled: false },
@@ -15,7 +14,7 @@ const MY_ACCOUNTS = [
   { id: 7, email: process.env.U_MAIL_7, pass: process.env.U_PASS_7, roomId: 22249609, enabled: false },
   { id: 8, email: process.env.U_MAIL_8, pass: process.env.U_PASS_8, roomId: 22249609, enabled: false },
   { id: 9, email: process.env.U_MAIL_9, pass: process.env.U_PASS_9, roomId: 22249609, enabled: false },
-  { id: 10, email: process.env.U_MAIL_10, pass: process.env.U_PASS_10, roomId: 22249609, enabled: true }, // <--- اجعلها true هنا
+  { id: 10, email: process.env.U_MAIL_10, pass: process.env.U_PASS_10, roomId: 22249609, enabled: true },
   { id: 11, email: process.env.U_MAIL_11, pass: process.env.U_PASS_11, roomId: 22249609, enabled: false },
   { id: 12, email: process.env.U_MAIL_12, pass: process.env.U_PASS_12, roomId: 22249609, enabled: false }
 ];
@@ -27,203 +26,90 @@ const WINNING_COMBOS = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [
 class BotInstance {
   constructor(config) {
     this.config = config;
-    this.service = new WOLF();
+    this.service = new _WOLF();
     this.board = Array(9).fill(null);
     this.mySign = 'X';
     this.botSign = 'O';
-    this.hasSentRestart = false;
-    this.gameInitiationInterval = null;
-    this.lastBoardFingerprint = ""; 
-    this.isProcessingMove = false; 
+    this.isProcessingMove = false;
     this.init();
   }
 
   init() {
     this.service.on('message', (msg) => this.handleIncomingData(msg));
-    this.service.on('messageUpdate', (msg) => this.handleIncomingData(msg));
     this.service.on('ready', async () => {
-      console.log(`[حساب ${this.config.id}] متصل وجاهز!`);
-      this.startInitiationLoop();
+      console.log(`[حساب ${this.config.id}] متصل!`);
+      this.service.messaging.sendGroupMessage(this.config.roomId, START_COMMAND);
     });
-    // تسجيل الدخول
     this.service.login(this.config.email, this.config.pass);
-  }
-
-  startInitiationLoop() {
-    if (this.gameInitiationInterval) return;
-    this.sendGroupMessageWithRetry(this.config.roomId, START_COMMAND);
-    this.gameInitiationInterval = setInterval(() => {
-      this.sendGroupMessageWithRetry(this.config.roomId, START_COMMAND);
-    }, 10000);
-  }
-
-  stopInitiationLoop() {
-    if (this.gameInitiationInterval) {
-      clearInterval(this.gameInitiationInterval);
-      this.gameInitiationInterval = null;
-    }
   }
 
   handleIncomingData(message) {
     if (message.type !== 'text/html') return;
     const html = message.body;
 
-    if (this.isProcessingMove) return;
-
-    const lowerHtml = html.toLowerCase();
-    const isEndGame = lowerHtml.includes('rematch') || lowerHtml.includes('you won') || lowerHtml.includes('you lost') || lowerHtml.includes('tie');
-    
-    if (isEndGame) {
-      this.lastBoardFingerprint = "";
-      if (!this.hasSentRestart) {
-        this.hasSentRestart = true;
-        setTimeout(() => { this.startInitiationLoop(); this.hasSentRestart = false; }, 5000);
-      }
-      return;
-    }
-
-    if (html.includes('xobot-mp-private__content__middle__position')) {
-      this.stopInitiationLoop();
-    }
-
     if (html.includes('Your Turn!')) {
-      this.hasSentRestart = false;
-      const blocks = html.split('xobot-mp-private__content__middle__position');
-      if (blocks.length > 9) {
-        let currentBoardString = "";
-        for (let i = 0; i < 9; i++) {
-          const block = blocks[i + 1];
-          if (block.includes('❌') || block.includes('--x')) this.board[i] = 'X';
-          else if (block.includes('⭕') || block.includes('--o')) this.board[i] = 'O';
-          else this.board[i] = null;
-          currentBoardString += (this.board[i] || "-");
-        }
+      this.parseBoard(html);
+      
+      // ميزة التشخيص: طباعة اللوحة التي يراها البوت
+      console.log(`[حساب ${this.config.id}] اللوحة الحالية التي يراها البوت:`);
+      console.log(`| ${this.board[0]||1} | ${this.board[1]||2} | ${this.board[2]||3} |`);
+      console.log(`| ${this.board[3]||4} | ${this.board[4]||5} | ${this.board[5]||6} |`);
+      console.log(`| ${this.board[6]||7} | ${this.board[7]||8} | ${this.board[8]||9} |`);
 
-        if (this.lastBoardFingerprint === currentBoardString) return;
+      if (this.isProcessingMove) return;
+      this.isProcessingMove = true;
+      
+      // تحديد الرموز
+      this.mySign = html.includes('(❌)') ? 'X' : 'O';
+      this.botSign = this.mySign === 'X' ? 'O' : 'X';
+      
+      this.triggerBotMove();
+    }
+  }
 
-        this.isProcessingMove = true; 
-        this.lastBoardFingerprint = currentBoardString;
-
-        if (html.includes('(❌)')) { this.mySign = 'X'; this.botSign = 'O'; }
-        else if (html.includes('(⭕)')) { this.mySign = 'O'; this.botSign = 'X'; }
-        
-        console.log(`[حساب ${this.config.id}] دوري الآن! جاري التحليل...`);
-        this.triggerBotMove();
+  parseBoard(html) {
+    const blocks = html.split('xobot-mp-private__content__middle__position');
+    if (blocks.length > 9) {
+      for (let i = 0; i < 9; i++) {
+        const block = blocks[i + 1];
+        if (block.includes('❌') || block.includes('--x')) this.board[i] = 'X';
+        else if (block.includes('⭕') || block.includes('--o')) this.board[i] = 'O';
+        else this.board[i] = null;
       }
     }
   }
 
   async triggerBotMove() {
-    try {
-      const moveIndex = this.getBestMove();
-      if (moveIndex !== undefined && moveIndex !== -1) {
-        const randomDelay = Math.floor(Math.random() * (2000 - 1000) + 1000);
-        console.log(`[حساب ${this.config.id}] سألعب الرقم ${moveIndex + 1} بعد ${randomDelay}ms...`);
-        
-        await new Promise(resolve => setTimeout(resolve, randomDelay));
-        
-        const squareToPlay = (moveIndex + 1).toString();
-        await this.sendPrivateMessageWithRetry(XO_BOT_ID, squareToPlay);
-      } else {
-        this.isProcessingMove = false;
-      }
-    } catch (err) {
-      console.error(`[حساب ${this.config.id}] خطأ:`, err);
-      this.isProcessingMove = false;
+    const moveIndex = this.getBestMove();
+    if (moveIndex !== undefined && moveIndex !== -1) {
+      console.log(`[حساب ${this.config.id}] سألعب الرقم: ${moveIndex + 1}`);
+      await this.service.messaging.sendPrivateMessage(XO_BOT_ID, (moveIndex + 1).toString());
     }
-  }
-
-  checkWinner(tempBoard, player) {
-    for (let combo of WINNING_COMBOS) {
-      if (tempBoard[combo[0]] === player && tempBoard[combo[1]] === player && tempBoard[combo[2]] === player) return true;
-    }
-    return false;
-  }
-
-  minimax(tempBoard, depth, isMaximizing) {
-    if (this.checkWinner(tempBoard, this.mySign)) return 10 - depth;
-    if (this.checkWinner(tempBoard, this.botSign)) return depth - 10;
-    if (!tempBoard.includes(null)) return 0;
-    if (isMaximizing) {
-      let bestScore = -Infinity;
-      for (let i = 0; i < 9; i++) {
-        if (tempBoard[i] === null) {
-          tempBoard[i] = this.mySign;
-          let score = this.minimax(tempBoard, depth + 1, false);
-          tempBoard[i] = null;
-          bestScore = Math.max(score, bestScore);
-        }
-      }
-      return bestScore;
-    } else {
-      let bestScore = Infinity;
-      for (let i = 0; i < 9; i++) {
-        if (tempBoard[i] === null) {
-          tempBoard[i] = this.botSign;
-          let score = this.minimax(tempBoard, depth + 1, true);
-          tempBoard[i] = null;
-          bestScore = Math.min(score, bestScore);
-        }
-      }
-      return bestScore;
-    }
+    this.isProcessingMove = false;
   }
 
   getBestMove() {
-    const availableMoves = [];
-    for (let i = 0; i < 9; i++) if (this.board[i] === null) availableMoves.push(i);
-    if (availableMoves.length === 0) return undefined;
+    const available = this.board.map((val, idx) => val === null ? idx : null).filter(val => val !== null);
+    if (available.length === 0) return -1;
+    
+    // منطق فوز بسيط
     for (let combo of WINNING_COMBOS) {
-      let myCount = 0, emptyIdx = -1;
-      for (let idx of combo) {
-        if (this.board[idx] === this.mySign) myCount++;
-        else if (this.board[idx] === null) emptyIdx = idx;
-      }
-      if (myCount === 2 && emptyIdx !== -1) return emptyIdx;
+        let empty = combo.filter(i => this.board[i] === null);
+        let my = combo.filter(i => this.board[i] === this.mySign);
+        if (my.length === 2 && empty.length === 1) return empty[0];
     }
+    
+    // الدفاع
     for (let combo of WINNING_COMBOS) {
-      let botCount = 0, emptyIdx = -1;
-      for (let idx of combo) {
-        if (this.board[idx] === this.botSign) botCount++;
-        else if (this.board[idx] === null) emptyIdx = idx;
-      }
-      if (botCount === 2 && emptyIdx !== -1) return emptyIdx;
+        let empty = combo.filter(i => this.board[i] === null);
+        let bot = combo.filter(i => this.board[i] === this.botSign);
+        if (bot.length === 2 && empty.length === 1) return empty[0];
     }
-    let bestScore = -Infinity;
-    let move = -1;
-    for (let i = 0; i < availableMoves.length; i++) {
-      let idx = availableMoves[i];
-      this.board[idx] = this.mySign;
-      let score = this.minimax(this.board, 0, false);
-      this.board[idx] = null;
-      if (score > bestScore) { bestScore = score; move = idx; }
-    }
-    return move;
-  }
 
-  async sendPrivateMessageWithRetry(targetId, text, attempt = 1) {
-    try { 
-        await this.service.messaging.sendPrivateMessage(targetId, text); 
-        console.log(`[حساب ${this.config.id}] تم إرسال الرقم بنجاح: ${text}`);
-        this.isProcessingMove = false; 
-    }
-    catch (err) { 
-        console.log(`[حساب ${this.config.id}] فشل (محاولة ${attempt}): ${err.message}`);
-        if (attempt < 3) setTimeout(() => this.sendPrivateMessageWithRetry(targetId, text, attempt + 1), 2000); 
-        else this.isProcessingMove = false; 
-    }
-  }
-
-  async sendGroupMessageWithRetry(roomId, text, attempt = 1) {
-    try { await this.service.messaging.sendGroupMessage(roomId, text); }
-    catch (err) { if (attempt < 3) setTimeout(() => this.sendGroupMessageWithRetry(roomId, text, attempt + 1), 2000); }
+    return available[Math.floor(Math.random() * available.length)];
   }
 }
 
-console.log("🚀 نظام تشغيل الحسابات يعمل الآن...");
 MY_ACCOUNTS.forEach((acc) => {
-  if (acc.enabled) {
-    setTimeout(() => { new BotInstance(acc); }, Math.random() * 5000);
-  }
+  if (acc.enabled) new BotInstance(acc);
 });
-process.stdin.resume();
