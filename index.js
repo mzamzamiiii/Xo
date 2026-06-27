@@ -3,7 +3,7 @@ import wolfjs from 'wolf.js';
 
 const { WOLF: _WOLF } = wolfjs;
 
-// قائمة الحسابات كاملة
+// قائمة الحسابات
 const MY_ACCOUNTS = [
   { id: 1, email: process.env.U_MAIL_1, pass: process.env.U_PASS_1, roomId: 22249609, enabled: false },
   { id: 2, email: process.env.U_MAIL_2, pass: process.env.U_PASS_2, roomId: 22249609, enabled: false },
@@ -32,6 +32,12 @@ class BotInstance {
     this.init();
   }
 
+  // محاكاة وقت بشري (عشوائي)
+  randomSleep(min, max) {
+    const ms = Math.floor(Math.random() * (max - min + 1) + min);
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
   resetState() {
     this.board = Array(9).fill(null);
     this.mySign = 'X';
@@ -39,10 +45,8 @@ class BotInstance {
     this.moveQueue = [];
     this.lastSentMove = null;
     this.isProcessingQueue = false;
-    this.isRestarting = false;
+    this.isRestarting = false; // تأكد من إعادة تصفير القفل
   }
-
-  async sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
   init() {
     this.service.on('message', (msg) => this.handleIncomingData(msg));
@@ -50,31 +54,26 @@ class BotInstance {
     
     this.service.on('ready', async () => {
       console.log(`[حساب ${this.config.id}] متصل.`);
-      await this.sleep(3000);
+      await this.randomSleep(2000, 5000);
       this.service.messaging.sendGroupMessage(this.config.roomId, START_COMMAND);
     });
     
     this.service.login(this.config.email, this.config.pass);
   }
 
-  addToQueue(moveIndex) {
-    this.moveQueue.push(moveIndex);
-    this.processQueue();
-  }
-
   async processQueue() {
     if (this.isProcessingQueue || this.moveQueue.length === 0) return;
-    
     this.isProcessingQueue = true;
     const moveIndex = this.moveQueue.shift();
     
     try {
-      console.log(`[حساب ${this.config.id}] جاري إرسال حركة: ${moveIndex + 1}`);
+      console.log(`[حساب ${this.config.id}] يرسل حركة: ${moveIndex + 1}`);
       await this.service.messaging.sendPrivateMessage(XO_BOT_ID, (moveIndex + 1).toString());
       this.lastSentMove = moveIndex;
-      await this.sleep(1000); 
+      // تأخير بشري بين الحركات
+      await this.randomSleep(1000, 2000); 
     } catch (err) {
-      console.error(`[حساب ${this.config.id}] خطأ إرسال:`, err);
+      console.error(err);
     } finally {
       this.isProcessingQueue = false;
       if (this.moveQueue.length > 0) this.processQueue();
@@ -85,25 +84,14 @@ class BotInstance {
     if (message.type !== 'text/html') return;
     const html = message.body;
 
-    // فلتر التكرار لمنع إرسال الأرقام مرتين
     if (this.lastMessageBody === html) return;
     this.lastMessageBody = html;
 
-    // فحص صارم لنهاية اللعبة
-    const isGameOver = (
-      (html.includes('You Won!') || html.includes('You Lost!') || html.includes('Tie!') || html.includes('Rematch')) 
-      && html.includes('Enter \'rematch\'')
-    );
+    const isGameOver = (html.includes('You Won!') || html.includes('You Lost!') || html.includes('Tie!') || html.includes('Rematch')) 
+                      && html.includes('Enter \'rematch\'');
     
-    if (isGameOver && !this.isRestarting) {
-      console.log(`[حساب ${this.config.id}] نهاية اللعبة مؤكدة. تنظيف وبدء...`);
-      this.isRestarting = true;
-      this.resetState(); 
-      
-      setTimeout(async () => {
-        this.service.messaging.sendGroupMessage(this.config.roomId, START_COMMAND);
-        this.isRestarting = false;
-      }, 5000); 
+    if (isGameOver) {
+      this.handleGameEnd();
       return;
     }
 
@@ -115,11 +103,25 @@ class BotInstance {
 
     if (html.includes('Your Turn!')) {
       if (this.lastSentMove !== null) return; 
-      
       this.mySign = html.includes('(❌)') ? 'X' : 'O';
       this.botSign = this.mySign === 'X' ? 'O' : 'X';
       this.triggerBotMove();
     }
+  }
+
+  async handleGameEnd() {
+    if (this.isRestarting) return;
+    this.isRestarting = true;
+    console.log(`[حساب ${this.config.id}] اللعبة انتهت، جاري الاستعداد للبدء...`);
+    
+    // تأخير بشري عشوائي للبدء (بدل الـ 5 ثواني الثابتة)
+    await this.randomSleep(4000, 9000);
+    
+    this.resetState(); 
+    this.service.messaging.sendGroupMessage(this.config.roomId, START_COMMAND);
+    
+    // تأمين فك القفل دائماً
+    setTimeout(() => { this.isRestarting = false; }, 2000);
   }
 
   parseBoard(html) {
@@ -139,7 +141,6 @@ class BotInstance {
     if (winner === this.mySign) return 10 - depth;
     if (winner === this.botSign) return depth - 10;
     if (!board.includes(null)) return 0;
-
     if (isMaximizing) {
       let bestScore = -Infinity;
       for (let i = 0; i < 9; i++) {
@@ -172,10 +173,11 @@ class BotInstance {
   }
 
   async triggerBotMove() {
-    await this.sleep(Math.random() * 500 + 800); 
+    // محاكاة "تفكير" البوت (تأخير عشوائي قبل اللعب)
+    await this.randomSleep(800, 2200); 
+    
     let bestScore = -Infinity;
     let move = -1;
-
     for (let i = 0; i < 9; i++) {
       if (this.board[i] === null) {
         this.board[i] = this.mySign;
