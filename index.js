@@ -23,7 +23,6 @@ const XO_BOT_ID = 82727814;
 const START_COMMAND = '!xo private ai 3';
 const WINNING_COMBOS = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]];
 
-// ================== قالب البوت (Class) ==================
 class BotInstance {
   constructor(config) {
     this.config = config;
@@ -33,11 +32,8 @@ class BotInstance {
     this.botSign = 'O';
     this.hasSentRestart = false;
     this.gameInitiationInterval = null;
-    
-    // إضافات لمنع التكرار (البصمة والقفل)
     this.lastBoardFingerprint = ""; 
     this.isProcessingMove = false; 
-    
     this.init();
   }
 
@@ -69,13 +65,15 @@ class BotInstance {
   handleIncomingData(message) {
     if (message.type !== 'text/html') return;
     const html = message.body;
-    const lowerHtml = html.toLowerCase();
     
+    // إذا كان البوت مشغولاً حالياً، لا تتدخل
+    if (this.isProcessingMove) return;
+
+    const lowerHtml = html.toLowerCase();
     const isEndGame = lowerHtml.includes('rematch') || lowerHtml.includes('you won') || lowerHtml.includes('you lost') || lowerHtml.includes('tie');
     
     if (isEndGame) {
-      this.lastBoardFingerprint = ""; // مسح البصمة
-      this.isProcessingMove = false;  // فتح القفل
+      this.lastBoardFingerprint = "";
       if (!this.hasSentRestart) {
         this.hasSentRestart = true;
         setTimeout(() => { this.startInitiationLoop(); this.hasSentRestart = false; }, 5000);
@@ -100,42 +98,41 @@ class BotInstance {
           currentBoardString += (this.board[i] || "-");
         }
 
-        // -- منطق منع التكرار: إذا لم تتغير اللوحة، توقف --
         if (this.lastBoardFingerprint === currentBoardString) return;
+        this.lastBoardFingerprint = currentBoardString;
 
         if (html.includes('(❌)')) { this.mySign = 'X'; this.botSign = 'O'; }
         else if (html.includes('(⭕)')) { this.mySign = 'O'; this.botSign = 'X'; }
         
-        this.lastBoardFingerprint = currentBoardString; // تحديث البصمة للجديدة
-        console.log(`[حساب ${this.config.id}] دوري الآن! جاري تحليل اللوحة...`);
+        console.log(`[حساب ${this.config.id}] دوري الآن! جاري التحليل...`);
         this.triggerBotMove();
       }
     }
   }
 
   async triggerBotMove() {
-    if (this.isProcessingMove) return; // قفل لمنع التكرار أثناء المعالجة
+    this.isProcessingMove = true; // قفل
     
-    this.isProcessingMove = true;
-    const moveIndex = this.getBestMove();
-    
-    if (moveIndex !== undefined && moveIndex !== -1) {
-      const randomDelay = Math.floor(Math.random() * (3000 - 1500) + 1500);
-      console.log(`[حساب ${this.config.id}] سألعب الرقم ${moveIndex + 1} بعد ${randomDelay}ms...`);
-      
-      await new Promise(resolve => setTimeout(resolve, randomDelay));
-      
-      const squareToPlay = (moveIndex + 1).toString();
-      await this.sendPrivateMessageWithRetry(XO_BOT_ID, squareToPlay);
-      
-      // فتح القفل بعد وقت كافٍ
-      setTimeout(() => { this.isProcessingMove = false; }, 3000);
-    } else {
-      this.isProcessingMove = false;
+    try {
+      const moveIndex = this.getBestMove();
+      if (moveIndex !== undefined && moveIndex !== -1) {
+        const randomDelay = Math.floor(Math.random() * (2000 - 1000) + 1000);
+        console.log(`[حساب ${this.config.id}] سألعب الرقم ${moveIndex + 1} بعد ${randomDelay}ms...`);
+        
+        await new Promise(resolve => setTimeout(resolve, randomDelay));
+        
+        const squareToPlay = (moveIndex + 1).toString();
+        await this.sendPrivateMessageWithRetry(XO_BOT_ID, squareToPlay);
+      }
+    } catch (err) {
+      console.error(`[حساب ${this.config.id}] خطأ في تنفيذ الحركة:`, err);
+    } finally {
+      // نفتح القفل دائماً مهما حدث
+      setTimeout(() => { this.isProcessingMove = false; }, 2000);
     }
   }
 
-  // --- دوال اللعبة كما هي ---
+  // --- دوال المساعدة ---
   checkWinner(tempBoard, player) {
     for (let combo of WINNING_COMBOS) {
       if (tempBoard[combo[0]] === player && tempBoard[combo[1]] === player && tempBoard[combo[2]] === player) return true;
@@ -205,8 +202,14 @@ class BotInstance {
   }
 
   async sendPrivateMessageWithRetry(targetId, text, attempt = 1) {
-    try { await this.service.messaging.sendPrivateMessage(targetId, text); }
-    catch (err) { if (attempt < 3) setTimeout(() => this.sendPrivateMessageWithRetry(targetId, text, attempt + 1), 2000); }
+    try { 
+        await this.service.messaging.sendPrivateMessage(targetId, text); 
+        console.log(`[حساب ${this.config.id}] تم إرسال الرقم بنجاح: ${text}`);
+    }
+    catch (err) { 
+        console.log(`[حساب ${this.config.id}] فشل في الإرسال (محاولة ${attempt}): ${err.message}`);
+        if (attempt < 3) setTimeout(() => this.sendPrivateMessageWithRetry(targetId, text, attempt + 1), 2000); 
+    }
   }
 
   async sendGroupMessageWithRetry(roomId, text, attempt = 1) {
@@ -215,18 +218,10 @@ class BotInstance {
   }
 }
 
-// ================== التشغيل ==================
 console.log("🚀 نظام تشغيل الحسابات يعمل الآن...");
-
 MY_ACCOUNTS.forEach((acc) => {
   if (acc.enabled) {
-    setTimeout(() => {
-      new BotInstance(acc);
-      console.log(`[حساب ${acc.id}] تم التشغيل بنجاح.`);
-    }, Math.random() * 5000);
-  } else {
-    console.log(`[حساب ${acc.id}] متوقف.`);
+    setTimeout(() => { new BotInstance(acc); }, Math.random() * 5000);
   }
 });
-
 process.stdin.resume();
