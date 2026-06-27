@@ -3,7 +3,7 @@ import wolfjs from 'wolf.js';
 
 const { WOLF } = wolfjs;
 
-// ================== لوحة التحكم (Config) - قائمة حساباتك كاملة ==================
+// ================== لوحة التحكم (Config) - حساباتك كاملة ==================
 const MY_ACCOUNTS = [
   { id: 1, email: process.env.U_MAIL_1, pass: process.env.U_PASS_1, roomId: 22249609, enabled: false },
   { id: 2, email: process.env.U_MAIL_2, pass: process.env.U_PASS_2, roomId: 22249609, enabled: false },
@@ -23,7 +23,6 @@ const XO_BOT_ID = 82727814;
 const START_COMMAND = '!xo private ai 3';
 const WINNING_COMBOS = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]];
 
-// ================== قالب البوت (Class) ==================
 class BotInstance {
   constructor(config) {
     this.config = config;
@@ -66,7 +65,8 @@ class BotInstance {
   handleIncomingData(message) {
     if (message.type !== 'text/html') return;
     const html = message.body;
-    
+
+    // --- القفل الصارم ---
     if (this.isProcessingMove) return;
 
     const lowerHtml = html.toLowerCase();
@@ -98,7 +98,11 @@ class BotInstance {
           currentBoardString += (this.board[i] || "-");
         }
 
+        // إذا كانت اللوحة لم تتغير، لا تفعل شيئاً
         if (this.lastBoardFingerprint === currentBoardString) return;
+
+        // القفل هنا فور اكتشاف الدور
+        this.isProcessingMove = true; 
         this.lastBoardFingerprint = currentBoardString;
 
         if (html.includes('(❌)')) { this.mySign = 'X'; this.botSign = 'O'; }
@@ -111,8 +115,6 @@ class BotInstance {
   }
 
   async triggerBotMove() {
-    this.isProcessingMove = true;
-    
     try {
       const moveIndex = this.getBestMove();
       if (moveIndex !== undefined && moveIndex !== -1) {
@@ -123,19 +125,16 @@ class BotInstance {
         
         const squareToPlay = (moveIndex + 1).toString();
         await this.sendPrivateMessageWithRetry(XO_BOT_ID, squareToPlay);
-        
-        // --- التعديل الأساسي هنا ---
-        // تصفير البصمة بعد الإرسال لضمان قراءة الحالة الجديدة في الدور القادم
-        this.lastBoardFingerprint = "";
+      } else {
+        this.isProcessingMove = false; // لا توجد حركة، افتح القفل
       }
     } catch (err) {
       console.error(`[حساب ${this.config.id}] خطأ:`, err);
-    } finally {
-      this.isProcessingMove = false;
+      this.isProcessingMove = false; // في حال الخطأ افتح القفل
     }
   }
 
-  // --- دوال اللعبة كما هي ---
+  // --- دوال اللعبة ---
   checkWinner(tempBoard, player) {
     for (let combo of WINNING_COMBOS) {
       if (tempBoard[combo[0]] === player && tempBoard[combo[1]] === player && tempBoard[combo[2]] === player) return true;
@@ -211,10 +210,12 @@ class BotInstance {
     try { 
         await this.service.messaging.sendPrivateMessage(targetId, text); 
         console.log(`[حساب ${this.config.id}] تم إرسال الرقم بنجاح: ${text}`);
+        this.isProcessingMove = false; // افتح القفل بعد النجاح
     }
     catch (err) { 
-        console.log(`[حساب ${this.config.id}] فشل في الإرسال (محاولة ${attempt}): ${err.message}`);
+        console.log(`[حساب ${this.config.id}] فشل (محاولة ${attempt}): ${err.message}`);
         if (attempt < 3) setTimeout(() => this.sendPrivateMessageWithRetry(targetId, text, attempt + 1), 2000); 
+        else this.isProcessingMove = false; // إذا فشلت المحاولات افتح القفل
     }
   }
 
@@ -224,7 +225,6 @@ class BotInstance {
   }
 }
 
-// ================== التشغيل ==================
 console.log("🚀 نظام تشغيل الحسابات يعمل الآن...");
 MY_ACCOUNTS.forEach((acc) => {
   if (acc.enabled) {
