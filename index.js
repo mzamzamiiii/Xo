@@ -27,6 +27,7 @@ class BotInstance {
   constructor(config) {
     this.config = config;
     this.service = new _WOLF();
+    this.lastMessageBody = '';
     this.resetState();
     this.init();
   }
@@ -48,7 +49,7 @@ class BotInstance {
     this.service.on('messageUpdate', (msg) => this.handleIncomingData(msg));
     
     this.service.on('ready', async () => {
-      console.log(`[حساب ${this.config.id}] متصل وجاهز.`);
+      console.log(`[حساب ${this.config.id}] متصل.`);
       await this.sleep(3000);
       this.service.messaging.sendGroupMessage(this.config.roomId, START_COMMAND);
     });
@@ -71,7 +72,7 @@ class BotInstance {
       console.log(`[حساب ${this.config.id}] جاري إرسال حركة: ${moveIndex + 1}`);
       await this.service.messaging.sendPrivateMessage(XO_BOT_ID, (moveIndex + 1).toString());
       this.lastSentMove = moveIndex;
-      await this.sleep(400); 
+      await this.sleep(1000); 
     } catch (err) {
       console.error(`[حساب ${this.config.id}] خطأ إرسال:`, err);
     } finally {
@@ -84,24 +85,31 @@ class BotInstance {
     if (message.type !== 'text/html') return;
     const html = message.body;
 
-    const isGameOver = html.includes('You Won!') || html.includes('You Lost!') || html.includes('Tie!') || html.includes('Rematch');
+    // فلتر التكرار لمنع إرسال الأرقام مرتين
+    if (this.lastMessageBody === html) return;
+    this.lastMessageBody = html;
+
+    // فحص صارم لنهاية اللعبة
+    const isGameOver = (
+      (html.includes('You Won!') || html.includes('You Lost!') || html.includes('Tie!') || html.includes('Rematch')) 
+      && html.includes('Enter \'rematch\'')
+    );
     
     if (isGameOver && !this.isRestarting) {
-      console.log(`[حساب ${this.config.id}] نهاية اللعبة. تنظيف وإعادة بدء...`);
+      console.log(`[حساب ${this.config.id}] نهاية اللعبة مؤكدة. تنظيف وبدء...`);
       this.isRestarting = true;
       this.resetState(); 
       
       setTimeout(async () => {
         this.service.messaging.sendGroupMessage(this.config.roomId, START_COMMAND);
         this.isRestarting = false;
-      }, 3000); 
+      }, 5000); 
       return;
     }
 
     this.parseBoard(html);
 
     if (this.lastSentMove !== null && this.board[this.lastSentMove] !== null) {
-      console.log(`[حساب ${this.config.id}] تأكيد وصول الحركة: ${this.lastSentMove + 1}`);
       this.lastSentMove = null;
     }
 
@@ -164,7 +172,7 @@ class BotInstance {
   }
 
   async triggerBotMove() {
-    await this.sleep(Math.random() * 500 + 500); 
+    await this.sleep(Math.random() * 500 + 800); 
     let bestScore = -Infinity;
     let move = -1;
 
