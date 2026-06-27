@@ -3,7 +3,8 @@ import wolfjs from 'wolf.js';
 
 const { WOLF } = wolfjs;
 
-// ================== لوحة التحكم (Config) - حساباتك كاملة ==================
+// ================== لوحة التحكم (Config) ==================
+// ملاحظة: لكي يعمل الحساب، اجعل enabled: true
 const MY_ACCOUNTS = [
   { id: 1, email: process.env.U_MAIL_1, pass: process.env.U_PASS_1, roomId: 22249609, enabled: false },
   { id: 2, email: process.env.U_MAIL_2, pass: process.env.U_PASS_2, roomId: 22249609, enabled: false },
@@ -14,7 +15,7 @@ const MY_ACCOUNTS = [
   { id: 7, email: process.env.U_MAIL_7, pass: process.env.U_PASS_7, roomId: 22249609, enabled: false },
   { id: 8, email: process.env.U_MAIL_8, pass: process.env.U_PASS_8, roomId: 22249609, enabled: false },
   { id: 9, email: process.env.U_MAIL_9, pass: process.env.U_PASS_9, roomId: 22249609, enabled: false },
-  { id: 10, email: process.env.U_MAIL_10, pass: process.env.U_PASS_10, roomId: 22249609, enabled: true },
+  { id: 10, email: process.env.U_MAIL_10, pass: process.env.U_PASS_10, roomId: 22249609, enabled: true }, // <--- اجعلها true هنا
   { id: 11, email: process.env.U_MAIL_11, pass: process.env.U_PASS_11, roomId: 22249609, enabled: false },
   { id: 12, email: process.env.U_MAIL_12, pass: process.env.U_PASS_12, roomId: 22249609, enabled: false }
 ];
@@ -44,6 +45,7 @@ class BotInstance {
       console.log(`[حساب ${this.config.id}] متصل وجاهز!`);
       this.startInitiationLoop();
     });
+    // تسجيل الدخول
     this.service.login(this.config.email, this.config.pass);
   }
 
@@ -66,7 +68,6 @@ class BotInstance {
     if (message.type !== 'text/html') return;
     const html = message.body;
 
-    // --- القفل الصارم ---
     if (this.isProcessingMove) return;
 
     const lowerHtml = html.toLowerCase();
@@ -98,10 +99,8 @@ class BotInstance {
           currentBoardString += (this.board[i] || "-");
         }
 
-        // إذا كانت اللوحة لم تتغير، لا تفعل شيئاً
         if (this.lastBoardFingerprint === currentBoardString) return;
 
-        // القفل هنا فور اكتشاف الدور
         this.isProcessingMove = true; 
         this.lastBoardFingerprint = currentBoardString;
 
@@ -126,15 +125,14 @@ class BotInstance {
         const squareToPlay = (moveIndex + 1).toString();
         await this.sendPrivateMessageWithRetry(XO_BOT_ID, squareToPlay);
       } else {
-        this.isProcessingMove = false; // لا توجد حركة، افتح القفل
+        this.isProcessingMove = false;
       }
     } catch (err) {
       console.error(`[حساب ${this.config.id}] خطأ:`, err);
-      this.isProcessingMove = false; // في حال الخطأ افتح القفل
+      this.isProcessingMove = false;
     }
   }
 
-  // --- دوال اللعبة ---
   checkWinner(tempBoard, player) {
     for (let combo of WINNING_COMBOS) {
       if (tempBoard[combo[0]] === player && tempBoard[combo[1]] === player && tempBoard[combo[2]] === player) return true;
@@ -175,7 +173,6 @@ class BotInstance {
     const availableMoves = [];
     for (let i = 0; i < 9; i++) if (this.board[i] === null) availableMoves.push(i);
     if (availableMoves.length === 0) return undefined;
-    
     for (let combo of WINNING_COMBOS) {
       let myCount = 0, emptyIdx = -1;
       for (let idx of combo) {
@@ -184,7 +181,6 @@ class BotInstance {
       }
       if (myCount === 2 && emptyIdx !== -1) return emptyIdx;
     }
-    
     for (let combo of WINNING_COMBOS) {
       let botCount = 0, emptyIdx = -1;
       for (let idx of combo) {
@@ -193,7 +189,6 @@ class BotInstance {
       }
       if (botCount === 2 && emptyIdx !== -1) return emptyIdx;
     }
-    
     let bestScore = -Infinity;
     let move = -1;
     for (let i = 0; i < availableMoves.length; i++) {
@@ -210,12 +205,12 @@ class BotInstance {
     try { 
         await this.service.messaging.sendPrivateMessage(targetId, text); 
         console.log(`[حساب ${this.config.id}] تم إرسال الرقم بنجاح: ${text}`);
-        this.isProcessingMove = false; // افتح القفل بعد النجاح
+        this.isProcessingMove = false; 
     }
     catch (err) { 
         console.log(`[حساب ${this.config.id}] فشل (محاولة ${attempt}): ${err.message}`);
         if (attempt < 3) setTimeout(() => this.sendPrivateMessageWithRetry(targetId, text, attempt + 1), 2000); 
-        else this.isProcessingMove = false; // إذا فشلت المحاولات افتح القفل
+        else this.isProcessingMove = false; 
     }
   }
 
@@ -229,9 +224,6 @@ console.log("🚀 نظام تشغيل الحسابات يعمل الآن...");
 MY_ACCOUNTS.forEach((acc) => {
   if (acc.enabled) {
     setTimeout(() => { new BotInstance(acc); }, Math.random() * 5000);
-  } else {
-    console.log(`[حساب ${acc.id}] متوقف.`);
   }
 });
-
 process.stdin.resume();
