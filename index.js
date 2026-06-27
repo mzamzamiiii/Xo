@@ -3,8 +3,7 @@ import wolfjs from 'wolf.js';
 
 const { WOLF } = wolfjs;
 
-// ================== الجزء الأول: لوحة التحكم (Config) ==================
-// هنا تضع حساباتك. غيّر enabled إلى true لتشغيل الحساب أو false لإيقافه.
+// ================== لوحة التحكم (Config) ==================
 const MY_ACCOUNTS = [
   { id: 1, email: process.env.U_MAIL_1, pass: process.env.U_PASS_1, roomId: 22249609, enabled: true },
   { id: 2, email: process.env.U_MAIL_2, pass: process.env.U_PASS_2, roomId: 22249609, enabled: false },
@@ -24,7 +23,7 @@ const XO_BOT_ID = 82727814;
 const START_COMMAND = '!xo private ai 3';
 const WINNING_COMBOS = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]];
 
-// ================== الجزء الثاني: قالب البوت (Class) ==================
+// ================== قالب البوت (Class) ==================
 class BotInstance {
   constructor(config) {
     this.config = config;
@@ -35,7 +34,6 @@ class BotInstance {
     this.botActionLock = false;
     this.hasSentRestart = false;
     this.gameInitiationInterval = null;
-
     this.init();
   }
 
@@ -49,7 +47,6 @@ class BotInstance {
     this.service.login(this.config.email, this.config.pass);
   }
 
-  // --- دوال حلقة البدء ---
   startInitiationLoop() {
     if (this.gameInitiationInterval) return;
     this.sendGroupMessageWithRetry(this.config.roomId, START_COMMAND);
@@ -65,7 +62,6 @@ class BotInstance {
     }
   }
 
-  // --- المنطق الذكي (نفس منطقك الأصلي) ---
   checkWinner(tempBoard, player) {
     for (let combo of WINNING_COMBOS) {
       if (tempBoard[combo[0]] === player && tempBoard[combo[1]] === player && tempBoard[combo[2]] === player) return true;
@@ -134,7 +130,6 @@ class BotInstance {
     return move;
   }
 
-  // --- المعالجة والإرسال ---
   handleIncomingData(message) {
     if (message.type !== 'text/html') return;
     const html = message.body;
@@ -190,17 +185,19 @@ class BotInstance {
   }
 }
 
-// ================== الجزء الثالث: التشغيل ==================
+// ================== التشغيل ==================
 console.log("🚀 نظام تشغيل الحسابات يعمل الآن...");
 
 MY_ACCOUNTS.forEach((acc) => {
   if (acc.enabled) {
-    // إضافة تأخير بسيط (Random Delay) لمنع حظر السيرفر أثناء تسجيل الدخول الجماعي
     setTimeout(() => {
       new BotInstance(acc);
       console.log(`[حساب ${acc.id}] تم التشغيل بنجاح.`);
     }, Math.random() * 5000);
   } else {
-    console.log(`[حساب ${acc.id}] متوقف (مضبوط على false).`);
+    console.log(`[حساب ${acc.id}] متوقف.`);
   }
 });
+
+// هذا السطر يمنع العملية من الإغلاق في GitHub Actions
+process.stdin.resume();
