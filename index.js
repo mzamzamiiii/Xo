@@ -3,7 +3,6 @@ import wolfjs from 'wolf.js';
 
 const { WOLF: _WOLF } = wolfjs;
 
-// قائمة الحسابات
 const MY_ACCOUNTS = [
   { id: 1, email: process.env.U_MAIL_1, pass: process.env.U_PASS_1, roomId: 22249609, enabled: false },
   { id: 2, email: process.env.U_MAIL_2, pass: process.env.U_PASS_2, roomId: 22249609, enabled: false },
@@ -32,10 +31,8 @@ class BotInstance {
     this.init();
   }
 
-  // محاكاة وقت بشري (عشوائي)
   randomSleep(min, max) {
-    const ms = Math.floor(Math.random() * (max - min + 1) + min);
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * (max - min + 1) + min)));
   }
 
   resetState() {
@@ -45,7 +42,7 @@ class BotInstance {
     this.moveQueue = [];
     this.lastSentMove = null;
     this.isProcessingQueue = false;
-    this.isRestarting = false; // تأكد من إعادة تصفير القفل
+    this.isRestarting = false;
   }
 
   init() {
@@ -53,12 +50,18 @@ class BotInstance {
     this.service.on('messageUpdate', (msg) => this.handleIncomingData(msg));
     
     this.service.on('ready', async () => {
-      console.log(`[حساب ${this.config.id}] متصل.`);
-      await this.randomSleep(2000, 5000);
+      console.log(`[حساب ${this.config.id}] متصل وجاهز.`);
+      await this.randomSleep(3000, 6000);
       this.service.messaging.sendGroupMessage(this.config.roomId, START_COMMAND);
     });
     
     this.service.login(this.config.email, this.config.pass);
+  }
+
+  // التأكد من تعريف الدالة بوضوح
+  addToQueue(moveIndex) {
+    this.moveQueue.push(moveIndex);
+    this.processQueue();
   }
 
   async processQueue() {
@@ -70,8 +73,7 @@ class BotInstance {
       console.log(`[حساب ${this.config.id}] يرسل حركة: ${moveIndex + 1}`);
       await this.service.messaging.sendPrivateMessage(XO_BOT_ID, (moveIndex + 1).toString());
       this.lastSentMove = moveIndex;
-      // تأخير بشري بين الحركات
-      await this.randomSleep(1000, 2000); 
+      await this.randomSleep(1200, 2500); // تأخير بشري
     } catch (err) {
       console.error(err);
     } finally {
@@ -112,16 +114,18 @@ class BotInstance {
   async handleGameEnd() {
     if (this.isRestarting) return;
     this.isRestarting = true;
-    console.log(`[حساب ${this.config.id}] اللعبة انتهت، جاري الاستعداد للبدء...`);
     
-    // تأخير بشري عشوائي للبدء (بدل الـ 5 ثواني الثابتة)
-    await this.randomSleep(4000, 9000);
+    // نظام أمان: فك القفل تلقائياً بعد دقيقة إذا علق البوت
+    const safetyTimer = setTimeout(() => { this.isRestarting = false; }, 60000);
+
+    console.log(`[حساب ${this.config.id}] اللعبة انتهت، جاري الاستعداد...`);
+    await this.randomSleep(5000, 10000);
     
     this.resetState(); 
     this.service.messaging.sendGroupMessage(this.config.roomId, START_COMMAND);
     
-    // تأمين فك القفل دائماً
-    setTimeout(() => { this.isRestarting = false; }, 2000);
+    clearTimeout(safetyTimer);
+    this.isRestarting = false;
   }
 
   parseBoard(html) {
@@ -173,9 +177,7 @@ class BotInstance {
   }
 
   async triggerBotMove() {
-    // محاكاة "تفكير" البوت (تأخير عشوائي قبل اللعب)
-    await this.randomSleep(800, 2200); 
-    
+    await this.randomSleep(1500, 3000); // وقت تفكير أطول قليلاً
     let bestScore = -Infinity;
     let move = -1;
     for (let i = 0; i < 9; i++) {
