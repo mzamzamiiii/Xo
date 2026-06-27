@@ -3,6 +3,7 @@ import wolfjs from 'wolf.js';
 
 const { WOLF: _WOLF } = wolfjs;
 
+// قائمة الحسابات كاملة
 const MY_ACCOUNTS = [
   { id: 1, email: process.env.U_MAIL_1, pass: process.env.U_PASS_1, roomId: 22249609, enabled: false },
   { id: 2, email: process.env.U_MAIL_2, pass: process.env.U_PASS_2, roomId: 22249609, enabled: false },
@@ -26,17 +27,18 @@ class BotInstance {
   constructor(config) {
     this.config = config;
     this.service = new _WOLF();
+    this.resetState();
+    this.init();
+  }
+
+  resetState() {
     this.board = Array(9).fill(null);
     this.mySign = 'X';
     this.botSign = 'O';
-    
-    // إضافات النظام الجديد
-    this.moveQueue = []; 
-    this.lastSentMove = null; // لمراقبة نجاح الحركة
+    this.moveQueue = [];
+    this.lastSentMove = null;
     this.isProcessingQueue = false;
     this.isRestarting = false;
-    
-    this.init();
   }
 
   async sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
@@ -44,15 +46,16 @@ class BotInstance {
   init() {
     this.service.on('message', (msg) => this.handleIncomingData(msg));
     this.service.on('messageUpdate', (msg) => this.handleIncomingData(msg));
+    
     this.service.on('ready', async () => {
-      console.log(`[حساب ${this.config.id}] متصل!`);
+      console.log(`[حساب ${this.config.id}] متصل وجاهز.`);
       await this.sleep(3000);
       this.service.messaging.sendGroupMessage(this.config.roomId, START_COMMAND);
     });
+    
     this.service.login(this.config.email, this.config.pass);
   }
 
-  // نظام الطابور (Queue System)
   addToQueue(moveIndex) {
     this.moveQueue.push(moveIndex);
     this.processQueue();
@@ -65,58 +68,49 @@ class BotInstance {
     const moveIndex = this.moveQueue.shift();
     
     try {
-      console.log(`[حساب ${this.config.id}] جاري إرسال الحركة: ${moveIndex + 1}`);
+      console.log(`[حساب ${this.config.id}] جاري إرسال حركة: ${moveIndex + 1}`);
       await this.service.messaging.sendPrivateMessage(XO_BOT_ID, (moveIndex + 1).toString());
-      this.lastSentMove = moveIndex; // تسجيل الحركة للمراقبة
-      
-      // الالتزام بـ 400ms كحد أدنى لضمان الاستقرار
+      this.lastSentMove = moveIndex;
       await this.sleep(400); 
     } catch (err) {
-      console.error(`[حساب ${this.config.id}] خطأ في الإرسال:`, err);
+      console.error(`[حساب ${this.config.id}] خطأ إرسال:`, err);
     } finally {
       this.isProcessingQueue = false;
-      // استدعاء المعالجة التالية إذا وجد شيء في الطابور
       if (this.moveQueue.length > 0) this.processQueue();
     }
   }
 
   handleIncomingData(message) {
-    try {
-      if (message.type !== 'text/html') return;
-      const html = message.body;
+    if (message.type !== 'text/html') return;
+    const html = message.body;
 
-      // تحديث حالة اللوحة
-      this.parseBoard(html);
+    const isGameOver = html.includes('You Won!') || html.includes('You Lost!') || html.includes('Tie!') || html.includes('Rematch');
+    
+    if (isGameOver && !this.isRestarting) {
+      console.log(`[حساب ${this.config.id}] نهاية اللعبة. تنظيف وإعادة بدء...`);
+      this.isRestarting = true;
+      this.resetState(); 
+      
+      setTimeout(async () => {
+        this.service.messaging.sendGroupMessage(this.config.roomId, START_COMMAND);
+        this.isRestarting = false;
+      }, 3000); 
+      return;
+    }
 
-      // التحقق من وصول الحركة السابقة
-      if (this.lastSentMove !== null && this.board[this.lastSentMove] !== null) {
-        console.log(`[حساب ${this.config.id}] تم التحقق: الحركة ${this.lastSentMove + 1} وصلت للسيرفر.`);
-        this.lastSentMove = null;
-      }
+    this.parseBoard(html);
 
-      const isGameOver = html.includes('You Won!') || html.includes('You Lost!') || html.includes('Tie!') || html.includes('Rematch');
-      if (isGameOver && !this.isRestarting) {
-        this.isRestarting = true;
-        setTimeout(async () => {
-          this.service.messaging.sendGroupMessage(this.config.roomId, START_COMMAND);
-          this.isRestarting = false;
-          this.board = Array(9).fill(null);
-          this.lastSentMove = null;
-        }, 5000); 
-        return;
-      }
+    if (this.lastSentMove !== null && this.board[this.lastSentMove] !== null) {
+      console.log(`[حساب ${this.config.id}] تأكيد وصول الحركة: ${this.lastSentMove + 1}`);
+      this.lastSentMove = null;
+    }
 
-      if (html.includes('Your Turn!')) {
-        // نمنع إرسال حركة جديدة إذا كانت هناك حركة معلقة في التحقق
-        if (this.lastSentMove !== null) return; 
-
-        this.mySign = html.includes('(❌)') ? 'X' : 'O';
-        this.botSign = this.mySign === 'X' ? 'O' : 'X';
-        
-        this.triggerBotMove();
-      }
-    } catch (error) {
-      console.error(`[خطأ في حساب ${this.config.id}]:`, error);
+    if (html.includes('Your Turn!')) {
+      if (this.lastSentMove !== null) return; 
+      
+      this.mySign = html.includes('(❌)') ? 'X' : 'O';
+      this.botSign = this.mySign === 'X' ? 'O' : 'X';
+      this.triggerBotMove();
     }
   }
 
@@ -170,9 +164,7 @@ class BotInstance {
   }
 
   async triggerBotMove() {
-    // زيادة عشوائية بسيطة لتجنب الأنماط المتكررة
-    await this.sleep(Math.random() * 500); 
-    
+    await this.sleep(Math.random() * 500 + 500); 
     let bestScore = -Infinity;
     let move = -1;
 
@@ -187,10 +179,7 @@ class BotInstance {
         }
       }
     }
-
-    if (move !== -1) {
-      this.addToQueue(move);
-    }
+    if (move !== -1) this.addToQueue(move);
   }
 }
 
