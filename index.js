@@ -31,11 +31,13 @@ class BotInstance {
     this.mySign = 'X';
     this.botSign = 'O';
     this.isProcessingMove = false;
+    this.isRestarting = false; // لمنع التكرار
     this.init();
   }
 
   init() {
     this.service.on('message', (msg) => this.handleIncomingData(msg));
+    this.service.on('messageUpdate', (msg) => this.handleIncomingData(msg));
     this.service.on('ready', async () => {
       console.log(`[حساب ${this.config.id}] متصل!`);
       this.service.messaging.sendGroupMessage(this.config.roomId, START_COMMAND);
@@ -47,19 +49,27 @@ class BotInstance {
     if (message.type !== 'text/html') return;
     const html = message.body;
 
+    // 1. اكتشاف نهاية اللعبة
+    const isGameOver = html.includes('You Won!') || html.includes('You Lost!') || html.includes('Tie!') || html.includes('Rematch');
+    if (isGameOver && !this.isRestarting) {
+      console.log(`[حساب ${this.config.id}] انتهت اللعبة. جاري البدء من جديد...`);
+      this.isRestarting = true;
+      setTimeout(() => {
+        this.service.messaging.sendGroupMessage(this.config.roomId, START_COMMAND);
+        this.isRestarting = false;
+        this.board = Array(9).fill(null); // تصفير اللوحة
+      }, 3000);
+      return;
+    }
+
+    // 2. معالجة الدور
     if (html.includes('Your Turn!')) {
+      this.isRestarting = false; // إذا كان دوري، اللعبة شغالة
       this.parseBoard(html);
       
-      // ميزة التشخيص: طباعة اللوحة التي يراها البوت
-      console.log(`[حساب ${this.config.id}] اللوحة الحالية التي يراها البوت:`);
-      console.log(`| ${this.board[0]||1} | ${this.board[1]||2} | ${this.board[2]||3} |`);
-      console.log(`| ${this.board[3]||4} | ${this.board[4]||5} | ${this.board[5]||6} |`);
-      console.log(`| ${this.board[6]||7} | ${this.board[7]||8} | ${this.board[8]||9} |`);
-
       if (this.isProcessingMove) return;
       this.isProcessingMove = true;
       
-      // تحديد الرموز
       this.mySign = html.includes('(❌)') ? 'X' : 'O';
       this.botSign = this.mySign === 'X' ? 'O' : 'X';
       
@@ -92,20 +102,21 @@ class BotInstance {
     const available = this.board.map((val, idx) => val === null ? idx : null).filter(val => val !== null);
     if (available.length === 0) return -1;
     
-    // منطق فوز بسيط
+    // منطق الهجوم (الفوز)
     for (let combo of WINNING_COMBOS) {
         let empty = combo.filter(i => this.board[i] === null);
         let my = combo.filter(i => this.board[i] === this.mySign);
         if (my.length === 2 && empty.length === 1) return empty[0];
     }
     
-    // الدفاع
+    // منطق الدفاع
     for (let combo of WINNING_COMBOS) {
         let empty = combo.filter(i => this.board[i] === null);
         let bot = combo.filter(i => this.board[i] === this.botSign);
         if (bot.length === 2 && empty.length === 1) return empty[0];
     }
 
+    // حركة عشوائية إذا لم يوجد فوز أو دفاع
     return available[Math.floor(Math.random() * available.length)];
   }
 }
