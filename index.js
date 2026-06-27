@@ -3,7 +3,6 @@ import wolfjs from 'wolf.js';
 
 const { WOLF: _WOLF } = wolfjs;
 
-// قائمة الحسابات كاملة
 const MY_ACCOUNTS = [
   { id: 1, email: process.env.U_MAIL_1, pass: process.env.U_PASS_1, roomId: 22249609, enabled: false },
   { id: 2, email: process.env.U_MAIL_2, pass: process.env.U_PASS_2, roomId: 22249609, enabled: false },
@@ -30,8 +29,13 @@ class BotInstance {
     this.board = Array(9).fill(null);
     this.mySign = 'X';
     this.botSign = 'O';
-    this.isProcessingMove = false;
+    
+    // إضافات النظام الجديد
+    this.moveQueue = []; 
+    this.lastSentMove = null; // لمراقبة نجاح الحركة
+    this.isProcessingQueue = false;
     this.isRestarting = false;
+    
     this.init();
   }
 
@@ -48,31 +52,64 @@ class BotInstance {
     this.service.login(this.config.email, this.config.pass);
   }
 
+  // نظام الطابور (Queue System)
+  addToQueue(moveIndex) {
+    this.moveQueue.push(moveIndex);
+    this.processQueue();
+  }
+
+  async processQueue() {
+    if (this.isProcessingQueue || this.moveQueue.length === 0) return;
+    
+    this.isProcessingQueue = true;
+    const moveIndex = this.moveQueue.shift();
+    
+    try {
+      console.log(`[حساب ${this.config.id}] جاري إرسال الحركة: ${moveIndex + 1}`);
+      await this.service.messaging.sendPrivateMessage(XO_BOT_ID, (moveIndex + 1).toString());
+      this.lastSentMove = moveIndex; // تسجيل الحركة للمراقبة
+      
+      // الالتزام بـ 400ms كحد أدنى لضمان الاستقرار
+      await this.sleep(400); 
+    } catch (err) {
+      console.error(`[حساب ${this.config.id}] خطأ في الإرسال:`, err);
+    } finally {
+      this.isProcessingQueue = false;
+      // استدعاء المعالجة التالية إذا وجد شيء في الطابور
+      if (this.moveQueue.length > 0) this.processQueue();
+    }
+  }
+
   handleIncomingData(message) {
     try {
       if (message.type !== 'text/html') return;
       const html = message.body;
 
-      // منطق إعادة التشغيل التلقائي عند انتهاء اللعبة
+      // تحديث حالة اللوحة
+      this.parseBoard(html);
+
+      // التحقق من وصول الحركة السابقة
+      if (this.lastSentMove !== null && this.board[this.lastSentMove] !== null) {
+        console.log(`[حساب ${this.config.id}] تم التحقق: الحركة ${this.lastSentMove + 1} وصلت للسيرفر.`);
+        this.lastSentMove = null;
+      }
+
       const isGameOver = html.includes('You Won!') || html.includes('You Lost!') || html.includes('Tie!') || html.includes('Rematch');
       if (isGameOver && !this.isRestarting) {
-        console.log(`[حساب ${this.config.id}] انتهت اللعبة. جاري البدء من جديد...`);
         this.isRestarting = true;
         setTimeout(async () => {
           this.service.messaging.sendGroupMessage(this.config.roomId, START_COMMAND);
           this.isRestarting = false;
           this.board = Array(9).fill(null);
+          this.lastSentMove = null;
         }, 5000); 
         return;
       }
 
       if (html.includes('Your Turn!')) {
-        if (this.isProcessingMove) return;
-        
-        this.isProcessingMove = true;
-        setTimeout(() => { this.isProcessingMove = false; }, 10000);
+        // نمنع إرسال حركة جديدة إذا كانت هناك حركة معلقة في التحقق
+        if (this.lastSentMove !== null) return; 
 
-        this.parseBoard(html);
         this.mySign = html.includes('(❌)') ? 'X' : 'O';
         this.botSign = this.mySign === 'X' ? 'O' : 'X';
         
@@ -80,7 +117,6 @@ class BotInstance {
       }
     } catch (error) {
       console.error(`[خطأ في حساب ${this.config.id}]:`, error);
-      this.isProcessingMove = false;
     }
   }
 
@@ -134,7 +170,9 @@ class BotInstance {
   }
 
   async triggerBotMove() {
-    await this.sleep(Math.random() * 2000 + 1000);
+    // زيادة عشوائية بسيطة لتجنب الأنماط المتكررة
+    await this.sleep(Math.random() * 500); 
+    
     let bestScore = -Infinity;
     let move = -1;
 
@@ -151,10 +189,8 @@ class BotInstance {
     }
 
     if (move !== -1) {
-      console.log(`[حساب ${this.config.id}] الحركة المختارة: ${move + 1}`);
-      await this.service.messaging.sendPrivateMessage(XO_BOT_ID, (move + 1).toString());
+      this.addToQueue(move);
     }
-    this.isProcessingMove = false;
   }
 }
 
