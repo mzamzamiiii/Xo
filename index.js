@@ -39,10 +39,9 @@ class BotInstance {
     this.board = Array(9).fill(null);
     this.mySign = 'X';
     this.botSign = 'O';
-    this.moveQueue = [];
-    this.lastSentMove = null;
-    this.isProcessingQueue = false;
     this.isRestarting = false;
+    this.isThinking = false; // لمنع البوت من التفكير في حركتين معاً
+    this.lastEmptySpots = -1; // نظام ذكي لمعرفة هل اللوحة تغيرت أم لا
   }
 
   init() {
@@ -58,56 +57,39 @@ class BotInstance {
     this.service.login(this.config.email, this.config.pass);
   }
 
-  // التأكد من تعريف الدالة بوضوح
-  addToQueue(moveIndex) {
-    this.moveQueue.push(moveIndex);
-    this.processQueue();
-  }
-
-  async processQueue() {
-    if (this.isProcessingQueue || this.moveQueue.length === 0) return;
-    this.isProcessingQueue = true;
-    const moveIndex = this.moveQueue.shift();
-    
-    try {
-      console.log(`[حساب ${this.config.id}] يرسل حركة: ${moveIndex + 1}`);
-      await this.service.messaging.sendPrivateMessage(XO_BOT_ID, (moveIndex + 1).toString());
-      this.lastSentMove = moveIndex;
-      await this.randomSleep(1200, 2500); // تأخير بشري
-    } catch (err) {
-      console.error(err);
-    } finally {
-      this.isProcessingQueue = false;
-      if (this.moveQueue.length > 0) this.processQueue();
-    }
-  }
-
   handleIncomingData(message) {
     if (message.type !== 'text/html') return;
     const html = message.body;
 
+    // فلترة التطابق التام
     if (this.lastMessageBody === html) return;
     this.lastMessageBody = html;
 
-    const isGameOver = (html.includes('You Won!') || html.includes('You Lost!') || html.includes('Tie!') || html.includes('Rematch')) 
-                      && html.includes('Enter \'rematch\'');
+    const lowerHtml = html.toLowerCase();
+
+    // فحص نهاية اللعبة بطريقة تتجاهل الرموز الغريبة (نبحث عن كلمات مستحيل تتغير)
+    const isGameOver = lowerHtml.includes('rematch request') || lowerHtml.includes('expires in 2 minutes');
     
     if (isGameOver) {
       this.handleGameEnd();
       return;
     }
 
+    // تحديث اللوحة
     this.parseBoard(html);
 
-    if (this.lastSentMove !== null && this.board[this.lastSentMove] !== null) {
-      this.lastSentMove = null;
-    }
-
-    if (html.includes('Your Turn!')) {
-      if (this.lastSentMove !== null) return; 
+    // إذا كان دورنا
+    if (lowerHtml.includes('your turn')) {
       this.mySign = html.includes('(❌)') ? 'X' : 'O';
       this.botSign = this.mySign === 'X' ? 'O' : 'X';
-      this.triggerBotMove();
+      
+      // نحسب كم مربع فاضي في اللوحة الآن
+      const currentEmptySpots = this.board.filter(c => c === null).length;
+      
+      // لا نلعب إلا إذا لم نكن نفكر حالياً، وإذا تغيرت اللوحة (عدد المربعات الفارغة نقص)
+      if (!this.isThinking && currentEmptySpots !== this.lastEmptySpots) {
+        this.triggerBotMove(currentEmptySpots);
+      }
     }
   }
 
@@ -115,14 +97,22 @@ class BotInstance {
     if (this.isRestarting) return;
     this.isRestarting = true;
     
-    // نظام أمان: فك القفل تلقائياً بعد دقيقة إذا علق البوت
-    const safetyTimer = setTimeout(() => { this.isRestarting = false; }, 60000);
+    console.log(`[حساب ${this.config.id}] اكتشفت نهاية اللعبة! جاري الاستعداد لبدء مباراة جديدة...`);
+    
+    // مؤقت أمان لفك القفل لو علق البوت لأي سبب
+    const safetyTimer = setTimeout(() => { this.isRestarting = false; }, 45000);
 
-    console.log(`[حساب ${this.config.id}] اللعبة انتهت، جاري الاستعداد...`);
-    await this.randomSleep(5000, 10000);
+    // تأخير بشري قبل بدء لعبة جديدة (يقرأ النتيجة)
+    await this.randomSleep(5000, 9000);
     
     this.resetState(); 
-    this.service.messaging.sendGroupMessage(this.config.roomId, START_COMMAND);
+    
+    try {
+        await this.service.messaging.sendGroupMessage(this.config.roomId, START_COMMAND);
+        console.log(`[حساب ${this.config.id}] تم إرسال أمر بدء اللعبة في الروم.`);
+    } catch (e) {
+        console.error(`[حساب ${this.config.id}] فشل في إرسال أمر البدء:`, e);
+    }
     
     clearTimeout(safetyTimer);
     this.isRestarting = false;
@@ -176,10 +166,16 @@ class BotInstance {
     return null;
   }
 
-  async triggerBotMove() {
-    await this.randomSleep(1500, 3000); // وقت تفكير أطول قليلاً
+  async triggerBotMove(currentEmptySpots) {
+    this.isThinking = true;
+    this.lastEmptySpots = currentEmptySpots; // نقوم بتسجيل حالة اللوحة حتى لا نرسل حركة أخرى بالخطأ
+
+    // تأخير التفكير البشري 
+    await this.randomSleep(1800, 3500); 
+    
     let bestScore = -Infinity;
     let move = -1;
+    
     for (let i = 0; i < 9; i++) {
       if (this.board[i] === null) {
         this.board[i] = this.mySign;
@@ -191,7 +187,20 @@ class BotInstance {
         }
       }
     }
-    if (move !== -1) this.addToQueue(move);
+    
+    if (move !== -1) {
+      console.log(`[حساب ${this.config.id}] يرسل حركة: ${move + 1}`);
+      try {
+        await this.service.messaging.sendPrivateMessage(XO_BOT_ID, (move + 1).toString());
+      } catch (e) {
+        console.error(`[حساب ${this.config.id}] خطأ أثناء اللعب:`, e);
+        this.lastEmptySpots = -1; // في حال فشل الإرسال، نلغي القفل ليحاول مرة أخرى
+      }
+    }
+
+    // استراحة قصيرة بعد إرسال الحركة لضمان استيعاب السيرفر
+    await this.randomSleep(1000, 1500);
+    this.isThinking = false;
   }
 }
 
@@ -199,6 +208,7 @@ class BotInstance {
   for (const acc of MY_ACCOUNTS) {
     if (acc.enabled) {
       new BotInstance(acc);
+      // مسافة زمنية بين تشغيل كل حساب لتجنب ضغط الشبكة
       await new Promise(resolve => setTimeout(resolve, 5000));
     }
   }
