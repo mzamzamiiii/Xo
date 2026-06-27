@@ -1,4 +1,4 @@
-name: Wolf Words Test
+Name: Wolf XO Bot
 
 on:
   workflow_dispatch:
@@ -21,6 +21,5 @@ jobs:
 
       - name: Run Bot
         env:
-          U_MAIL_1: ${{ secrets.U_MAIL_1 }}
-          U_PASS_1: ${{ secrets.U_PASS_1 }}
+          BOT_ACCOUNTS: ${{ secrets.BOT_ACCOUNTS }}
         run: npm start
