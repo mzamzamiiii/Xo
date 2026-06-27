@@ -26,7 +26,6 @@ class BotInstance {
   constructor(config) {
     this.config = config;
     this.service = new _WOLF();
-    this.lastMessageBody = '';
     this.resetState();
     this.init();
   }
@@ -40,8 +39,8 @@ class BotInstance {
     this.mySign = 'X';
     this.botSign = 'O';
     this.isRestarting = false;
-    this.isThinking = false; // لمنع البوت من التفكير في حركتين معاً
-    this.lastEmptySpots = -1; // نظام ذكي لمعرفة هل اللوحة تغيرت أم لا
+    this.isThinking = false;
+    this.lastPlayedTurnCount = -1; // تتبع عدد المربعات المشغولة لمنع تكرار اللعب في نفس الدور
   }
 
   init() {
@@ -60,22 +59,21 @@ class BotInstance {
   handleIncomingData(message) {
     if (message.type !== 'text/html') return;
     const html = message.body;
-
-    // فلترة التطابق التام
-    if (this.lastMessageBody === html) return;
-    this.lastMessageBody = html;
-
     const lowerHtml = html.toLowerCase();
 
-    // فحص نهاية اللعبة بطريقة تتجاهل الرموز الغريبة (نبحث عن كلمات مستحيل تتغير)
-    const isGameOver = lowerHtml.includes('rematch request') || lowerHtml.includes('expires in 2 minutes');
+    // فحص نهاية اللعبة بشكل مرن وصارم جداً بناءً على الصور المرفقة
+    const isGameOver = lowerHtml.includes('rematch') || 
+                      lowerHtml.includes('expires in') || 
+                      lowerHtml.includes('tie') || 
+                      lowerHtml.includes('won!') || 
+                      lowerHtml.includes('lost!');
     
     if (isGameOver) {
       this.handleGameEnd();
       return;
     }
 
-    // تحديث اللوحة
+    // تحديث اللوحة في كل تحديث يصل دون شروط حظر مسبقة
     this.parseBoard(html);
 
     // إذا كان دورنا
@@ -83,12 +81,12 @@ class BotInstance {
       this.mySign = html.includes('(❌)') ? 'X' : 'O';
       this.botSign = this.mySign === 'X' ? 'O' : 'X';
       
-      // نحسب كم مربع فاضي في اللوحة الآن
-      const currentEmptySpots = this.board.filter(c => c === null).length;
+      // حساب المربعات المشغولة حالياً باللوحة
+      const occupiedSpots = this.board.filter(c => c !== null).length;
       
-      // لا نلعب إلا إذا لم نكن نفكر حالياً، وإذا تغيرت اللوحة (عدد المربعات الفارغة نقص)
-      if (!this.isThinking && currentEmptySpots !== this.lastEmptySpots) {
-        this.triggerBotMove(currentEmptySpots);
+      // نلعب فقط إذا لم نكن في حالة تفكير، ولم نقم باللعب في هذا الدور المليء مسبقاً
+      if (!this.isThinking && occupiedSpots !== this.lastPlayedTurnCount) {
+        this.triggerBotMove(occupiedSpots);
       }
     }
   }
@@ -97,21 +95,21 @@ class BotInstance {
     if (this.isRestarting) return;
     this.isRestarting = true;
     
-    console.log(`[حساب ${this.config.id}] اكتشفت نهاية اللعبة! جاري الاستعداد لبدء مباراة جديدة...`);
+    console.log(`[حساب ${this.config.id}] نهاية اللعبة مؤكدة. تنظيف وبدء جديد...`);
     
-    // مؤقت أمان لفك القفل لو علق البوت لأي سبب
-    const safetyTimer = setTimeout(() => { this.isRestarting = false; }, 45000);
+    // مؤقت أمان كلي لإعادة تصفير القفل تلقائياً بعد 30 ثانية مهما حدث
+    const safetyTimer = setTimeout(() => { this.isRestarting = false; }, 30000);
 
-    // تأخير بشري قبل بدء لعبة جديدة (يقرأ النتيجة)
-    await this.randomSleep(5000, 9000);
+    // وقت انتظار بشري عشوائي وممتاز قبل طلب مباراة جديدة (بين 5 إلى 8 ثوانٍ)
+    await this.randomSleep(5000, 8000);
     
     this.resetState(); 
     
     try {
         await this.service.messaging.sendGroupMessage(this.config.roomId, START_COMMAND);
-        console.log(`[حساب ${this.config.id}] تم إرسال أمر بدء اللعبة في الروم.`);
+        console.log(`[حساب ${this.config.id}] تم إرسال أمر البدء الجديد بنجاح.`);
     } catch (e) {
-        console.error(`[حساب ${this.config.id}] فشل في إرسال أمر البدء:`, e);
+        console.error(`[حساب ${this.config.id}] خطأ أثناء محاولة البدء:`, e);
     }
     
     clearTimeout(safetyTimer);
@@ -166,12 +164,12 @@ class BotInstance {
     return null;
   }
 
-  async triggerBotMove(currentEmptySpots) {
+  async triggerBotMove(occupiedSpots) {
     this.isThinking = true;
-    this.lastEmptySpots = currentEmptySpots; // نقوم بتسجيل حالة اللوحة حتى لا نرسل حركة أخرى بالخطأ
+    this.lastPlayedTurnCount = occupiedSpots; 
 
-    // تأخير التفكير البشري 
-    await this.randomSleep(1800, 3500); 
+    // محاكاة التفكير البشري الطبيعي (بين 1.5 إلى 3 ثوانٍ) قبل اختيار الحركة
+    await this.randomSleep(1500, 3000); 
     
     let bestScore = -Infinity;
     let move = -1;
@@ -189,17 +187,17 @@ class BotInstance {
     }
     
     if (move !== -1) {
-      console.log(`[حساب ${this.config.id}] يرسل حركة: ${move + 1}`);
+      console.log(`[حساب ${this.config.id}] جاري إرسال حركة: ${move + 1}`);
       try {
         await this.service.messaging.sendPrivateMessage(XO_BOT_ID, (move + 1).toString());
       } catch (e) {
-        console.error(`[حساب ${this.config.id}] خطأ أثناء اللعب:`, e);
-        this.lastEmptySpots = -1; // في حال فشل الإرسال، نلغي القفل ليحاول مرة أخرى
+        console.error(`[حساب ${this.config.id}] تعذر إرسال الحركة:`, e);
+        this.lastPlayedTurnCount = -1; // تصفير القفل في حال حدوث خطأ شبكة للتعويض
       }
     }
 
-    // استراحة قصيرة بعد إرسال الحركة لضمان استيعاب السيرفر
-    await this.randomSleep(1000, 1500);
+    // انتظار بشري خفيف بعد الإرسال للتأكد من استقرار اللوحة
+    await this.randomSleep(800, 1500);
     this.isThinking = false;
   }
 }
@@ -208,8 +206,7 @@ class BotInstance {
   for (const acc of MY_ACCOUNTS) {
     if (acc.enabled) {
       new BotInstance(acc);
-      // مسافة زمنية بين تشغيل كل حساب لتجنب ضغط الشبكة
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      await new Promise(resolve => setTimeout(resolve, 4000));
     }
   }
 })();
