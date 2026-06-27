@@ -3,7 +3,7 @@ import wolfjs from 'wolf.js';
 
 const { WOLF } = wolfjs;
 
-// ================== لوحة التحكم (Config) ==================
+// ================== لوحة التحكم (Config) - قائمة حساباتك كاملة ==================
 const MY_ACCOUNTS = [
   { id: 1, email: process.env.U_MAIL_1, pass: process.env.U_PASS_1, roomId: 22249609, enabled: false },
   { id: 2, email: process.env.U_MAIL_2, pass: process.env.U_PASS_2, roomId: 22249609, enabled: false },
@@ -23,6 +23,7 @@ const XO_BOT_ID = 82727814;
 const START_COMMAND = '!xo private ai 3';
 const WINNING_COMBOS = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]];
 
+// ================== قالب البوت (Class) ==================
 class BotInstance {
   constructor(config) {
     this.config = config;
@@ -66,7 +67,6 @@ class BotInstance {
     if (message.type !== 'text/html') return;
     const html = message.body;
     
-    // إذا كان البوت مشغولاً حالياً، لا تتدخل
     if (this.isProcessingMove) return;
 
     const lowerHtml = html.toLowerCase();
@@ -111,7 +111,7 @@ class BotInstance {
   }
 
   async triggerBotMove() {
-    this.isProcessingMove = true; // قفل
+    this.isProcessingMove = true;
     
     try {
       const moveIndex = this.getBestMove();
@@ -123,16 +123,19 @@ class BotInstance {
         
         const squareToPlay = (moveIndex + 1).toString();
         await this.sendPrivateMessageWithRetry(XO_BOT_ID, squareToPlay);
+        
+        // --- التعديل الأساسي هنا ---
+        // تصفير البصمة بعد الإرسال لضمان قراءة الحالة الجديدة في الدور القادم
+        this.lastBoardFingerprint = "";
       }
     } catch (err) {
-      console.error(`[حساب ${this.config.id}] خطأ في تنفيذ الحركة:`, err);
+      console.error(`[حساب ${this.config.id}] خطأ:`, err);
     } finally {
-      // نفتح القفل دائماً مهما حدث
-      setTimeout(() => { this.isProcessingMove = false; }, 2000);
+      this.isProcessingMove = false;
     }
   }
 
-  // --- دوال المساعدة ---
+  // --- دوال اللعبة كما هي ---
   checkWinner(tempBoard, player) {
     for (let combo of WINNING_COMBOS) {
       if (tempBoard[combo[0]] === player && tempBoard[combo[1]] === player && tempBoard[combo[2]] === player) return true;
@@ -173,6 +176,7 @@ class BotInstance {
     const availableMoves = [];
     for (let i = 0; i < 9; i++) if (this.board[i] === null) availableMoves.push(i);
     if (availableMoves.length === 0) return undefined;
+    
     for (let combo of WINNING_COMBOS) {
       let myCount = 0, emptyIdx = -1;
       for (let idx of combo) {
@@ -181,6 +185,7 @@ class BotInstance {
       }
       if (myCount === 2 && emptyIdx !== -1) return emptyIdx;
     }
+    
     for (let combo of WINNING_COMBOS) {
       let botCount = 0, emptyIdx = -1;
       for (let idx of combo) {
@@ -189,6 +194,7 @@ class BotInstance {
       }
       if (botCount === 2 && emptyIdx !== -1) return emptyIdx;
     }
+    
     let bestScore = -Infinity;
     let move = -1;
     for (let i = 0; i < availableMoves.length; i++) {
@@ -218,10 +224,14 @@ class BotInstance {
   }
 }
 
+// ================== التشغيل ==================
 console.log("🚀 نظام تشغيل الحسابات يعمل الآن...");
 MY_ACCOUNTS.forEach((acc) => {
   if (acc.enabled) {
     setTimeout(() => { new BotInstance(acc); }, Math.random() * 5000);
+  } else {
+    console.log(`[حساب ${acc.id}] متوقف.`);
   }
 });
+
 process.stdin.resume();
