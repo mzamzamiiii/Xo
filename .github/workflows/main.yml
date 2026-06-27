@@ -1,6 +1,8 @@
 name: Wolf XO Bot
 
 on:
+  push:
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -21,7 +23,7 @@ jobs:
 
       - name: Run Bot
         env:
-          # ربط كل حساب بـ Secrets الخاص به
+          # متغيرات الحسابات (تأكد من إضافتها في Settings > Secrets)
           U_MAIL_1: ${{ secrets.U_MAIL_1 }}
           U_PASS_1: ${{ secrets.U_PASS_1 }}
           U_MAIL_2: ${{ secrets.U_MAIL_2 }}
@@ -46,4 +48,4 @@ jobs:
           U_PASS_11: ${{ secrets.U_PASS_11 }}
           U_MAIL_12: ${{ secrets.U_MAIL_12 }}
           U_PASS_12: ${{ secrets.U_PASS_12 }}
-        run: node index.js
+        run: npm start
