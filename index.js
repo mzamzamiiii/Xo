@@ -33,16 +33,16 @@ class BotInstance {
     this.botSign = 'O';
     this.hasSentRestart = false;
     this.gameInitiationInterval = null;
+    
+    // إضافات لمنع التكرار (البصمة والقفل)
+    this.lastBoardFingerprint = ""; 
+    this.isProcessingMove = false; 
+    
     this.init();
   }
 
   init() {
-    this.service.on('message', (msg) => {
-      // DEBUG: طباعة نوع الرسالة لتعرف لماذا قد يتجاهلها البوت
-      // console.log(`[حساب ${this.config.id}] استلمت رسالة من نوع: ${msg.type}`); 
-      this.handleIncomingData(msg);
-    });
-    
+    this.service.on('message', (msg) => this.handleIncomingData(msg));
     this.service.on('messageUpdate', (msg) => this.handleIncomingData(msg));
     this.service.on('ready', async () => {
       console.log(`[حساب ${this.config.id}] متصل وجاهز!`);
@@ -56,7 +56,7 @@ class BotInstance {
     this.sendGroupMessageWithRetry(this.config.roomId, START_COMMAND);
     this.gameInitiationInterval = setInterval(() => {
       this.sendGroupMessageWithRetry(this.config.roomId, START_COMMAND);
-    }, 10000); // زيادة الوقت قليلاً لتقليل الإزعاج
+    }, 10000);
   }
 
   stopInitiationLoop() {
@@ -66,6 +66,76 @@ class BotInstance {
     }
   }
 
+  handleIncomingData(message) {
+    if (message.type !== 'text/html') return;
+    const html = message.body;
+    const lowerHtml = html.toLowerCase();
+    
+    const isEndGame = lowerHtml.includes('rematch') || lowerHtml.includes('you won') || lowerHtml.includes('you lost') || lowerHtml.includes('tie');
+    
+    if (isEndGame) {
+      this.lastBoardFingerprint = ""; // مسح البصمة
+      this.isProcessingMove = false;  // فتح القفل
+      if (!this.hasSentRestart) {
+        this.hasSentRestart = true;
+        setTimeout(() => { this.startInitiationLoop(); this.hasSentRestart = false; }, 5000);
+      }
+      return;
+    }
+
+    if (html.includes('xobot-mp-private__content__middle__position')) {
+      this.stopInitiationLoop();
+    }
+
+    if (html.includes('Your Turn!')) {
+      this.hasSentRestart = false;
+      const blocks = html.split('xobot-mp-private__content__middle__position');
+      if (blocks.length > 9) {
+        let currentBoardString = "";
+        for (let i = 0; i < 9; i++) {
+          const block = blocks[i + 1];
+          if (block.includes('❌') || block.includes('--x')) this.board[i] = 'X';
+          else if (block.includes('⭕') || block.includes('--o')) this.board[i] = 'O';
+          else this.board[i] = null;
+          currentBoardString += (this.board[i] || "-");
+        }
+
+        // -- منطق منع التكرار: إذا لم تتغير اللوحة، توقف --
+        if (this.lastBoardFingerprint === currentBoardString) return;
+
+        if (html.includes('(❌)')) { this.mySign = 'X'; this.botSign = 'O'; }
+        else if (html.includes('(⭕)')) { this.mySign = 'O'; this.botSign = 'X'; }
+        
+        this.lastBoardFingerprint = currentBoardString; // تحديث البصمة للجديدة
+        console.log(`[حساب ${this.config.id}] دوري الآن! جاري تحليل اللوحة...`);
+        this.triggerBotMove();
+      }
+    }
+  }
+
+  async triggerBotMove() {
+    if (this.isProcessingMove) return; // قفل لمنع التكرار أثناء المعالجة
+    
+    this.isProcessingMove = true;
+    const moveIndex = this.getBestMove();
+    
+    if (moveIndex !== undefined && moveIndex !== -1) {
+      const randomDelay = Math.floor(Math.random() * (3000 - 1500) + 1500);
+      console.log(`[حساب ${this.config.id}] سألعب الرقم ${moveIndex + 1} بعد ${randomDelay}ms...`);
+      
+      await new Promise(resolve => setTimeout(resolve, randomDelay));
+      
+      const squareToPlay = (moveIndex + 1).toString();
+      await this.sendPrivateMessageWithRetry(XO_BOT_ID, squareToPlay);
+      
+      // فتح القفل بعد وقت كافٍ
+      setTimeout(() => { this.isProcessingMove = false; }, 3000);
+    } else {
+      this.isProcessingMove = false;
+    }
+  }
+
+  // --- دوال اللعبة كما هي ---
   checkWinner(tempBoard, player) {
     for (let combo of WINNING_COMBOS) {
       if (tempBoard[combo[0]] === player && tempBoard[combo[1]] === player && tempBoard[combo[2]] === player) return true;
@@ -106,8 +176,6 @@ class BotInstance {
     const availableMoves = [];
     for (let i = 0; i < 9; i++) if (this.board[i] === null) availableMoves.push(i);
     if (availableMoves.length === 0) return undefined;
-    
-    // Check Winning
     for (let combo of WINNING_COMBOS) {
       let myCount = 0, emptyIdx = -1;
       for (let idx of combo) {
@@ -116,7 +184,6 @@ class BotInstance {
       }
       if (myCount === 2 && emptyIdx !== -1) return emptyIdx;
     }
-    // Block Opponent
     for (let combo of WINNING_COMBOS) {
       let botCount = 0, emptyIdx = -1;
       for (let idx of combo) {
@@ -125,7 +192,6 @@ class BotInstance {
       }
       if (botCount === 2 && emptyIdx !== -1) return emptyIdx;
     }
-    
     let bestScore = -Infinity;
     let move = -1;
     for (let i = 0; i < availableMoves.length; i++) {
@@ -136,60 +202,6 @@ class BotInstance {
       if (score > bestScore) { bestScore = score; move = idx; }
     }
     return move;
-  }
-
-  handleIncomingData(message) {
-    // نترك الشرط كما هو لكن نتأكد من الرسائل التي تحتوي نص للعبة
-    if (message.type !== 'text/html') return;
-    const html = message.body;
-    const lowerHtml = html.toLowerCase();
-    
-    const isEndGame = lowerHtml.includes('rematch') || lowerHtml.includes('you won') || lowerHtml.includes('you lost') || lowerHtml.includes('tie');
-
-    if (isEndGame) {
-      if (!this.hasSentRestart) {
-        this.hasSentRestart = true;
-        setTimeout(() => { this.startInitiationLoop(); this.hasSentRestart = false; }, 5000);
-      }
-      return;
-    }
-
-    if (html.includes('xobot-mp-private__content__middle__position')) {
-      this.stopInitiationLoop();
-    }
-
-    if (html.includes('Your Turn!')) {
-      this.hasSentRestart = false;
-      const blocks = html.split('xobot-mp-private__content__middle__position');
-      if (blocks.length > 9) {
-        for (let i = 0; i < 9; i++) {
-          const block = blocks[i + 1];
-          if (block.includes('❌') || block.includes('--x')) this.board[i] = 'X';
-          else if (block.includes('⭕') || block.includes('--o')) this.board[i] = 'O';
-          else this.board[i] = null;
-        }
-        if (html.includes('(❌)')) { this.mySign = 'X'; this.botSign = 'O'; }
-        else if (html.includes('(⭕)')) { this.mySign = 'O'; this.botSign = 'X'; }
-        
-        console.log(`[حساب ${this.config.id}] دوري الآن! جاري تحليل اللوحة...`);
-        this.triggerBotMove();
-      }
-    }
-  }
-
-  async triggerBotMove() {
-    const moveIndex = this.getBestMove();
-    if (moveIndex !== undefined && moveIndex !== -1) {
-      // -- نظام التمويه البشري --
-      const randomDelay = Math.floor(Math.random() * (3000 - 1500) + 1500);
-      console.log(`[حساب ${this.config.id}] سألعب الرقم ${moveIndex + 1} بعد ${randomDelay}ms...`);
-      
-      await new Promise(resolve => setTimeout(resolve, randomDelay));
-      // --------------------------
-      
-      const squareToPlay = (moveIndex + 1).toString();
-      this.sendPrivateMessageWithRetry(XO_BOT_ID, squareToPlay);
-    }
   }
 
   async sendPrivateMessageWithRetry(targetId, text, attempt = 1) {
