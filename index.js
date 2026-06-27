@@ -26,21 +26,23 @@ class BotInstance {
   constructor(config) {
     this.config = config;
     this.service = new _WOLF();
+    this.lastGameOverTime = 0;
     this.resetState();
     this.init();
   }
 
-  randomSleep(min, max) {
-    return new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * (max - min + 1) + min)));
+  // استخدام تأخير ثابت 400ms للحفاظ على السرعة والاستقرار
+  sleep400() {
+    return new Promise(resolve => setTimeout(resolve, 400));
   }
 
   resetState() {
     this.board = Array(9).fill(null);
     this.mySign = 'X';
     this.botSign = 'O';
-    this.isRestarting = false;
-    this.isThinking = false;
-    this.lastPlayedTurnCount = -1; // تتبع عدد المربعات المشغولة لمنع تكرار اللعب في نفس الدور
+    this.isProcessing = false;
+    this.lastPlayedBoard = null; 
+    this.gameActive = false;
   }
 
   init() {
@@ -49,71 +51,75 @@ class BotInstance {
     
     this.service.on('ready', async () => {
       console.log(`[حساب ${this.config.id}] متصل وجاهز.`);
-      await this.randomSleep(3000, 6000);
+      await this.sleep400();
       this.service.messaging.sendGroupMessage(this.config.roomId, START_COMMAND);
     });
     
     this.service.login(this.config.email, this.config.pass);
   }
 
-  handleIncomingData(message) {
+  async handleIncomingData(message) {
+    // معالجة الرسائل النصية من البوت (مثل: "1 has already been used")
+    if (message.sourceSubscriberId === XO_BOT_ID && message.type === 'text/plain') {
+      const body = message.body.toLowerCase();
+      if (body.includes('already been used') || body.includes('not your turn')) {
+        console.log(`[حساب ${this.config.id}] تنبيه: حركة متعارضة. جاري فك القفل لإعادة المحاولة...`);
+        this.lastPlayedBoard = null; // فك القفل لكي يعيد قراءة اللوحة ويلعب من جديد
+        return;
+      }
+    }
+
     if (message.type !== 'text/html') return;
     const html = message.body;
     const lowerHtml = html.toLowerCase();
 
-    // فحص نهاية اللعبة بشكل مرن وصارم جداً بناءً على الصور المرفقة
     const isGameOver = lowerHtml.includes('rematch') || 
-                      lowerHtml.includes('expires in') || 
-                      lowerHtml.includes('tie') || 
-                      lowerHtml.includes('won!') || 
-                      lowerHtml.includes('lost!');
+                       lowerHtml.includes('expires in') || 
+                       lowerHtml.includes('tie') || 
+                       lowerHtml.includes('won!') || 
+                       lowerHtml.includes('lost!');
     
     if (isGameOver) {
       this.handleGameEnd();
       return;
     }
 
-    // تحديث اللوحة في كل تحديث يصل دون شروط حظر مسبقة
-    this.parseBoard(html);
-
-    // إذا كان دورنا
     if (lowerHtml.includes('your turn')) {
+      this.gameActive = true;
       this.mySign = html.includes('(❌)') ? 'X' : 'O';
       this.botSign = this.mySign === 'X' ? 'O' : 'X';
       
-      // حساب المربعات المشغولة حالياً باللوحة
-      const occupiedSpots = this.board.filter(c => c !== null).length;
+      this.parseBoard(html);
       
-      // نلعب فقط إذا لم نكن في حالة تفكير، ولم نقم باللعب في هذا الدور المليء مسبقاً
-      if (!this.isThinking && occupiedSpots !== this.lastPlayedTurnCount) {
-        this.triggerBotMove(occupiedSpots);
+      // تحويل حالة اللوحة الحالية إلى نص لمقارنتها
+      const currentBoardStr = JSON.stringify(this.board);
+      
+      // نلعب فقط إذا كانت اللوحة مختلفة عن آخر مرة لعبنا فيها، وإذا لم نكن نلعب حالياً
+      if (this.lastPlayedBoard !== currentBoardStr && !this.isProcessing) {
+        this.triggerBotMove(currentBoardStr);
       }
     }
   }
 
   async handleGameEnd() {
-    if (this.isRestarting) return;
-    this.isRestarting = true;
+    const now = Date.now();
+    // نظام حماية: تجاهل أي رسائل نهاية لعبة مكررة تصل خلال 5 ثوانٍ من انتهاء اللعبة فعلياً
+    if (now - this.lastGameOverTime < 5000) return;
+    this.lastGameOverTime = now;
     
-    console.log(`[حساب ${this.config.id}] نهاية اللعبة مؤكدة. تنظيف وبدء جديد...`);
+    // إيقاف أي حركات قيد الانتظار فوراً
+    this.gameActive = false;
     
-    // مؤقت أمان كلي لإعادة تصفير القفل تلقائياً بعد 30 ثانية مهما حدث
-    const safetyTimer = setTimeout(() => { this.isRestarting = false; }, 30000);
-
-    // وقت انتظار بشري عشوائي وممتاز قبل طلب مباراة جديدة (بين 5 إلى 8 ثوانٍ)
-    await this.randomSleep(5000, 8000);
+    console.log(`[حساب ${this.config.id}] نهاية اللعبة مؤكدة. تنظيف وبدء من جديد...`);
     
+    await this.sleep400(); 
     this.resetState(); 
     
     try {
         await this.service.messaging.sendGroupMessage(this.config.roomId, START_COMMAND);
-        console.log(`[حساب ${this.config.id}] تم إرسال أمر البدء الجديد بنجاح.`);
     } catch (e) {
-        console.error(`[حساب ${this.config.id}] خطأ أثناء محاولة البدء:`, e);
+        console.error(`[حساب ${this.config.id}] خطأ في إرسال أمر البدء:`, e);
     }
-    
-    clearTimeout(safetyTimer);
-    this.isRestarting = false;
   }
 
   parseBoard(html) {
@@ -133,6 +139,7 @@ class BotInstance {
     if (winner === this.mySign) return 10 - depth;
     if (winner === this.botSign) return depth - 10;
     if (!board.includes(null)) return 0;
+    
     if (isMaximizing) {
       let bestScore = -Infinity;
       for (let i = 0; i < 9; i++) {
@@ -164,41 +171,51 @@ class BotInstance {
     return null;
   }
 
-  async triggerBotMove(occupiedSpots) {
-    this.isThinking = true;
-    this.lastPlayedTurnCount = occupiedSpots; 
+  async triggerBotMove(currentBoardStr) {
+    this.isProcessing = true;
+    this.lastPlayedBoard = currentBoardStr; // قفل اللوحة الحالية لمنع اللعب عليها مرة أخرى
 
-    // محاكاة التفكير البشري الطبيعي (بين 1.5 إلى 3 ثوانٍ) قبل اختيار الحركة
-    await this.randomSleep(1500, 3000); 
+    await this.sleep400(); 
+    
+    // فحص مصيري: إذا انتهت اللعبة أثناء تأخير الـ 400ms، نلغي إرسال الحركة تماماً
+    if (!this.gameActive) {
+      this.isProcessing = false;
+      return; 
+    }
     
     let bestScore = -Infinity;
     let move = -1;
     
-    for (let i = 0; i < 9; i++) {
-      if (this.board[i] === null) {
-        this.board[i] = this.mySign;
-        let score = this.minimax(this.board, 0, false);
-        this.board[i] = null;
-        if (score > bestScore) {
-          bestScore = score;
-          move = i;
+    // تحسين الأداء: إذا كانت اللوحة فارغة تماماً، العب في المنتصف فوراً دون حسابات معقدة
+    const emptyCount = this.board.filter(c => c === null).length;
+    if (emptyCount === 9) {
+      move = 4;
+    } else {
+      for (let i = 0; i < 9; i++) {
+        if (this.board[i] === null) {
+          this.board[i] = this.mySign;
+          let score = this.minimax(this.board, 0, false);
+          this.board[i] = null;
+          if (score > bestScore) {
+            bestScore = score;
+            move = i;
+          }
         }
       }
     }
     
     if (move !== -1) {
-      console.log(`[حساب ${this.config.id}] جاري إرسال حركة: ${move + 1}`);
+      console.log(`[حساب ${this.config.id}] يرسل حركة: ${move + 1}`);
       try {
         await this.service.messaging.sendPrivateMessage(XO_BOT_ID, (move + 1).toString());
       } catch (e) {
-        console.error(`[حساب ${this.config.id}] تعذر إرسال الحركة:`, e);
-        this.lastPlayedTurnCount = -1; // تصفير القفل في حال حدوث خطأ شبكة للتعويض
+        // في حال فشل الإرسال الشبكي، نفك القفل ليحاول البوت اللعب مجدداً
+        this.lastPlayedBoard = null;
       }
     }
 
-    // انتظار بشري خفيف بعد الإرسال للتأكد من استقرار اللوحة
-    await this.randomSleep(800, 1500);
-    this.isThinking = false;
+    await this.sleep400();
+    this.isProcessing = false;
   }
 }
 
@@ -206,7 +223,7 @@ class BotInstance {
   for (const acc of MY_ACCOUNTS) {
     if (acc.enabled) {
       new BotInstance(acc);
-      await new Promise(resolve => setTimeout(resolve, 4000));
+      await new Promise(resolve => setTimeout(resolve, 400));
     }
   }
 })();
